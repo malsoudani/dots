@@ -1,0 +1,40 @@
+#!/bin/bash
+
+# Function to check if Python is installed
+check_python_installed() {
+    if command -v python3 &>/dev/null; then
+        PYTHON="python3"
+    elif command -v python &>/dev/null; then
+        PYTHON="python"
+    else
+        echo "Python is not installed. Please install Python to proceed."
+        exit 1
+    fi
+}
+
+# Function to create symlinks for all Python scripts in the current directory
+create_symlinks() {
+    local add_to_path_script="add_to_path.py"
+
+    if [[ ! -f "$add_to_path_script" ]]; then
+        echo "Error: $add_to_path_script not found in the current directory."
+        exit 1
+    fi
+
+    for script in *.py; do
+        # Skip the add_to_path.py script itself
+        if [[ "$script" != "$add_to_path_script" ]]; then
+            echo "Creating symlink for $script"
+            $PYTHON "$add_to_path_script" "$script"
+        fi
+    done
+}
+
+# Check if Python is installed
+check_python_installed
+
+# Create symlinks for all Python scripts in the current directory
+create_symlinks
+
+echo "Symlinks created for all Python utilities in the current directory."
+
