@@ -1,0 +1,36 @@
+# Brewfile
+
+# Package Manager
+brew "yarn"
+
+# JavaScript/TypeScript Development
+brew "node"
+brew "watchman"  # Required for React Native
+
+# Python Development
+brew "python"
+brew "pyenv"
+
+# Golang Development
+brew "go"
+
+# Utility Packages
+brew "fzf"  # Command-line fuzzy finder
+brew "jq"   # JSON processor, useful for working with JSON data
+brew "git"  # Version control
+
+# Development Tools
+brew "neovim"  # Modern Vim for coding
+brew "tmux"    # Terminal multiplexer
+brew "htop"    # Process viewer
+brew "tree"    # Directory tree visualizer
+
+# Database Tools (optional, if you work with databases)
+brew "postgresql"  # PostgreSQL database
+brew "redis"       # Redis key-value store
+
+# Miscellaneous
+brew "zsh"       # Z Shell
+brew "zsh-completions"  # Tab completion for Zsh
+brew "thefuck"   # Corrects errors in previous console commands
+brew "bat"       # A cat clone with syntax highlighting and Git integration
