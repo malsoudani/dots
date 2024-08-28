@@ -24,6 +24,7 @@ brew "neovim"  # Modern Vim for coding
 brew "tmux"    # Terminal multiplexer
 brew "htop"    # Process viewer
 brew "tree"    # Directory tree visualizer
+brew "the_silver_searcher" # Code searching tool similar to ack
 
 # Database Tools (optional, if you work with databases)
 brew "postgresql"  # PostgreSQL database
