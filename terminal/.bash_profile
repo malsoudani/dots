@@ -1,25 +1,19 @@
 ff () {
-  start_path="$1"
-  dir=$(ls -1);
+  local start_path="${1:-$PWD}"
+  local selection
 
-    if [[ -z "$start_path" ]]; then
-      files=$(ls -1 $(findr $PWD '.' 2>/dev/null | \
-                      fzf --multi --height 80% --reverse --preview 'cat {}' | \
-                      perl -ne 'chomp $_; print $_ . " "'))
-      echo $files;
-      if [[ "$dir" =~ "$files" ]]; then
-        return;
-      fi
-      vim $files
-    else
-      files=$(ls -1 $(findr $start_path '.' 2>/dev/null | \
-                      fzf --multi --height 80% --reverse --preview 'cat {}' | \
-                      perl -ne 'chomp $_; print $_ . " "'))
-      if [[ "$dir" =~ "$files" ]]; then
-        return;
-      fi
-      vim $files
-    fi
+  selection=$(findr "$start_path" '.' 2>/dev/null | \
+              fzf --multi --height 80% --reverse --preview 'cat {}') || return
+
+  [[ -z "$selection" ]] && return
+
+  if command -v code >/dev/null 2>&1; then
+    while IFS= read -r file; do
+      [[ -n "$file" ]] && code -r "$file"
+    done <<< "$selection"
+  else
+    echo "VS Code CLI not found. Install the 'code' command from VS Code."
+  fi
 }
 
 findr () {
@@ -31,9 +25,13 @@ findr () {
   path=$1;
   file_name=$2;
   if [[ $(hostname) =~ beta|i0|my0|www0 ]]; then
-    find $path -regextype posix-extended -regex ".*$file_name";
+    find "$path" -regextype posix-extended -regex ".*$file_name";
   else
-    ag "." -lG $file_name $path
+    if command -v ag >/dev/null 2>&1; then
+      ag "." -lG "$file_name" "$path"
+    else
+      rg --files "$path" | rg "$file_name"
+    fi
   fi;
 }
 

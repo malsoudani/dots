@@ -18,13 +18,14 @@ brew "go"
 brew "fzf"  # Command-line fuzzy finder
 brew "jq"   # JSON processor, useful for working with JSON data
 brew "git"  # Version control
+brew "bash" # Updated Bash shell
 
 # Development Tools
 brew "neovim"  # Modern Vim for coding
 brew "tmux"    # Terminal multiplexer
 brew "htop"    # Process viewer
 brew "tree"    # Directory tree visualizer
-brew "the_silver_searcher" # Code searching tool similar to ack
+brew "the_silver_searcher" # Provides the `ag` command
 
 # Database Tools (optional, if you work with databases)
 brew "postgresql"  # PostgreSQL database

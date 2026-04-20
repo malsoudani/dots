@@ -1,28 +1,28 @@
 source ~/.bashrc
 
+# Load Homebrew into PATH for both Apple Silicon and Intel macOS.
+if [[ -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [[ -x /usr/local/bin/brew ]]; then
+  eval "$(/usr/local/bin/brew shellenv)"
+fi
+
 ff () {
+  local start_path="${1:-$PWD}"
+  local selection
 
-  start_path="$1"
-  dir=$(ls -1);
+  selection=$(findr "$start_path" '.' 2>/dev/null | \
+              fzf --multi --height 80% --reverse --preview 'bat --style=numbers --color=always {} | head -500') || return
 
-    if [[ -z "$start_path" ]]; then
-      files=$(ls -1 $(findr $PWD '.' 2>/dev/null | \
-                      fzf --multi --height 80% --reverse --preview 'bat --style=numbers --color=always {} | head -500' | \
-                      perl -ne 'chomp $_; print $_ . " "'))
-      echo $files;
-      if [[ "$dir" =~ "$files" ]]; then
-        return;
-      fi
-      emacs $files
-    else
-      files=$(ls -1 $(findr $start_path '.' 2>/dev/null | \
-                      fzf --multi --height 80% --reverse --preview 'bat --style=numbers --color=always {} | head -500' | \
-                      perl -ne 'chomp $_; print $_ . " "'))
-      if [[ "$dir" =~ "$files" ]]; then
-        return;
-      fi
-      emacs $files
-    fi
+  [[ -z "$selection" ]] && return
+
+  if command -v code >/dev/null 2>&1; then
+    while IFS= read -r file; do
+      [[ -n "$file" ]] && code -r "$file"
+    done <<< "$selection"
+  else
+    echo "VS Code CLI not found. Install the 'code' command from VS Code."
+  fi
 }
 
 findr () {
@@ -32,7 +32,11 @@ findr () {
   fi
   path=$1;
   file_name=$2;
-  ag "." -lG $file_name $path
+  if command -v ag >/dev/null 2>&1; then
+    ag "." -lG "$file_name" "$path"
+  else
+    rg --files "$path" | rg "$file_name"
+  fi
 } 
 
 # search a directory and cd into it
