@@ -1,0 +1,1977 @@
+#!/usr/bin/env python3
+"""doctrine: compile, check and install the Doctrine engineering standards.
+
+Python 3.8+, standard library only. Everything agent-specific is data in
+agents/registry.json. The first half of this file is pure logic (parsing,
+linting, rendering, registry validation, path expansion): values in, values
+out, no I/O. The functions that touch the file system, the environment or the
+process are grouped at the bottom.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime
+import difflib
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+PROG = "doctrine"
+TIERS = ("micro", "compact", "full")
+PROFILES = ("fullstack", "backend", "frontend")
+PLATFORMS = ("darwin", "linux", "windows")
+MODES = ("file", "block", "modelfile", "text")
+COMMENTS = ("html", "hash")
+SEVERITIES = ("RED", "ORANGE", "YELLOW")
+BUDGETS = {"micro": 4000, "compact": 12000}  # characters, for the fullstack profile
+DEFAULT_REFERENCE_DIR = ".doctrine"
+WHOLE_FILE_MODES = ("file", "text", "modelfile")
+SCOPES = {"project": "project", "workspace": "workspace", "namespace": "workspace",
+          "global": "global", "user": "global"}
+RESERVED_AGENT_IDS = ("all", "detected", "custom")
+PATH_VARIABLES = ("xdg_config", "vscode_user", "appdata")
+EXAMPLE_DOMAINS = ("example.com", "example.org", "example.net")
+SKIP_DIRS = (".git", "node_modules", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")
+REFERENCE_SKIP = ("node_modules", ".venv", "__pycache__", "db.sqlite3")
+MANIFEST_REL = "doctrine/installs.json"
+MANIFEST_SCHEMA = 1
+BACKUP_STAMP_RE = "%Y%m%dT%H%M%SZ"
+DEPTH_DEFAULT = 2
+
+# (area key = core file stem, id prefix, display name), in rendering order.
+AREAS = (
+    ("principles", "P", "Principles"),
+    ("backend", "BE", "Backend"),
+    ("frontend", "FE", "Frontend"),
+    ("contracts", "CT", "Contracts"),
+    ("testing", "T", "Testing"),
+    ("delivery", "D", "Delivery"),
+    ("review", "R", "Review"),
+    ("adoption", "A", "Adoption"),
+)
+AREA_BY_PREFIX = dict((prefix, key) for key, prefix, _ in AREAS)
+CATALOG_FILES = tuple("core/%s.md" % key for key, _, _ in AREAS)
+REQUIRED_CORE = ("core/operating.md",) + CATALOG_FILES + ("core/checklists.md",)
+GUIDE_FILES = ("agents/guide.head.md", "agents/guide.tail.md")
+REGISTRY_FILE = "agents/registry.json"
+REQUIRED_FILES = ("VERSION",) + REQUIRED_CORE + (REGISTRY_FILE,) + GUIDE_FILES
+DIST_TIERS = (
+    ("dist/doctrine.micro.md", "micro", "fullstack"),
+    ("dist/doctrine.compact.md", "compact", "fullstack"),
+    ("dist/doctrine.compact.backend.md", "compact", "backend"),
+    ("dist/doctrine.compact.frontend.md", "compact", "frontend"),
+    ("dist/doctrine.full.md", "full", "fullstack"),
+)
+
+ID_PATTERN = r"(?:P|BE|FE|CT|T|D|R|A)(?:-[A-Z]+)?-?\d+"
+HEADING_RE = re.compile(r"^### (" + ID_PATTERN + r") · (.{10,80})$")
+HEADING_LOOSE_RE = re.compile(r"^### (" + ID_PATTERN + r") · (.*)$")
+META_RE = re.compile(r"^<!-- doctrine:((?: [a-z]+=[^\s=]+)+) -->$")
+LABEL_RE = re.compile(r"^\*\*(Rule|Why|How|Example|Anti-pattern|Check|Principle|In practice)\.\*\*(.*)$")
+BACKTICK_ID_RE = re.compile(r"`(" + ID_PATTERN + r")`")
+FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+EXCERPT_RE = re.compile(r"^(\s*)<!-- excerpt: (.+?) -->\s*$")
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+AWS_KEY_RE = re.compile(r"AKIA[0-9A-Z]{16}")
+PRIVATE_KEY_RE = re.compile(r"-{5}BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-{5}")
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})")
+QUOTE_VALUE_RE = re.compile(r'"quote"\s*:\s*"(?:[^"\\]|\\.)*"')
+
+Problem = Tuple[str, int, str]  # (file relative to the package, 1-based line, message)
+
+
+class DoctrineError(Exception):
+    """A failure the user can act on. Reported as one line; exit code 1."""
+
+
+class Model:
+    """A parsed package: everything `render` needs, already in memory."""
+
+    def __init__(self, version: str, texts: Dict[str, str], records: List[Dict[str, Any]]) -> None:
+        self.version = version
+        self.texts = texts
+        self.records = records
+        self.howtos = sorted(rel for rel in texts if re.match(r"^howto/[^/]+\.md$", rel))
+
+    def in_area(self, area: str, tier: Optional[str] = None) -> List[Dict[str, Any]]:
+        return [r for r in self.records if r["area"] == area and (tier is None or r["tier"] == tier)]
+
+
+# --------------------------------------------------------------------------
+# Rule catalog parser (pure)
+# --------------------------------------------------------------------------
+
+def scan_lines(text: str) -> List[Tuple[int, str, str]]:
+    """Classify each line as text, or as the open / code / close of a fenced block."""
+    out = []  # type: List[Tuple[int, str, str]]
+    fence = ""
+    for number, line in enumerate(text.split("\n"), 1):
+        match = FENCE_RE.match(line)
+        if not fence:
+            if match:
+                fence = match.group(1)
+            out.append((number, line, "open" if match else "text"))
+        elif match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence) \
+                and not match.group(2).strip():
+            fence = ""
+            out.append((number, line, "close"))
+        else:
+            out.append((number, line, "code"))
+    return out
+
+
+def id_prefix(rule_id: str) -> str:
+    return re.match(r"[A-Z]+", rule_id).group(0)  # type: ignore[union-attr]
+
+
+def parse_meta(line: str, is_principle: bool) -> Tuple[Dict[str, Any], Optional[str]]:
+    """Parse the `<!-- doctrine: ... -->` line under a heading. Returns (meta, error)."""
+    expected = ("tier",) if is_principle else ("severity", "tier", "principles")
+    shape = "<!-- doctrine: %s -->" % " ".join(key + "=..." for key in expected)
+    if not line.startswith("<!-- doctrine:"):
+        return {}, "metadata comment is missing: expected `%s` on the line after the heading" % shape
+    match = META_RE.match(line)
+    if not match:
+        return {}, "metadata comment is malformed: expected `%s`" % shape
+    pairs = [pair.split("=", 1) for pair in match.group(1).split()]
+    meta = dict((key, value) for key, value in pairs)  # type: Dict[str, Any]
+    if len(pairs) != len(meta) or sorted(meta) != sorted(expected):
+        return {}, "metadata comment is malformed: expected exactly the keys %s" % ", ".join(expected)
+    if meta["tier"] not in ("micro", "compact"):
+        return {}, "metadata comment is malformed: tier must be micro or compact"
+    if not is_principle:
+        if meta["severity"] not in SEVERITIES:
+            return {}, "metadata comment is malformed: severity must be RED, ORANGE or YELLOW"
+        meta["principles"] = meta["principles"].split(",")
+        if not all(re.match(r"^P\d+$", item) for item in meta["principles"]):
+            return {}, "metadata comment is malformed: principles must be principle ids separated by commas"
+    return meta, None
+
+
+def parse_catalog(rel: str, text: str) -> Tuple[List[Dict[str, Any]], List[Problem]]:
+    """Parse one catalog file into rule records plus the grammar problems found."""
+    problems = []  # type: List[Problem]
+    sections = []  # type: List[Tuple[Dict[str, Any], Dict[str, List[str]]]]
+    lines = scan_lines(text)
+    group = ""
+    labels = None  # type: Optional[Dict[str, List[str]]]
+    active = ""
+    for index, (number, line, kind) in enumerate(lines):
+        if kind != "text":
+            continue
+        heading = re.match(r"^(#{1,3})(?:\s|$)", line)
+        if heading:
+            labels, active = None, ""
+            level = len(heading.group(1))
+            if level < 3:
+                group = line[level:].strip() if level == 2 else ""
+                continue
+            match = HEADING_RE.match(line)
+            if not match:
+                loose = HEADING_LOOSE_RE.match(line)
+                if loose and len(loose.group(2)) > 80:
+                    problems.append((rel, number, "title is longer than 80 characters (%d)" % len(loose.group(2))))
+                else:
+                    problems.append((rel, number, "heading does not match the rule grammar "
+                                     "`### ID · Title` (known id prefix, middle dot, title of 10 to 80 characters)"))
+                continue
+            rule_id = match.group(1)
+            prefix = id_prefix(rule_id)
+            following = lines[index + 1][1] if index + 1 < len(lines) else ""
+            meta, error = parse_meta(following, prefix == "P")
+            if error:
+                problems.append((rel, number + 1, error))
+            labels = {}
+            sections.append(({
+                "id": rule_id, "title": match.group(2).strip(), "area": AREA_BY_PREFIX[prefix],
+                "group": group, "severity": meta.get("severity"), "tier": meta.get("tier", "compact"),
+                "principles": meta.get("principles", []), "check": None, "file": rel, "line": number,
+            }, labels))
+        elif labels is not None:
+            label = LABEL_RE.match(line)
+            if label:
+                active = label.group(1)
+                labels[active] = [label.group(2).strip()]
+            elif active and line.strip():
+                labels[active].append(line.strip())
+            else:
+                active = ""
+    for record, found in sections:
+        is_principle = record["area"] == "principles"
+        kind_name = "principle" if is_principle else "rule"
+        for required in (("Principle", "Why", "In practice") if is_principle else ("Rule", "Why", "How", "Check")):
+            if required not in found:
+                problems.append((rel, record["line"], "%s %s lacks **%s.**" % (kind_name, record["id"], required)))
+        if not is_principle and "Check" in found:
+            record["check"] = " ".join(part for part in found["Check"] if part)
+            if not record["check"]:
+                problems.append((rel, record["line"], "rule %s has an empty **Check.**" % record["id"]))
+    return [record for record, _ in sections], problems
+
+
+def parse_catalogs(texts: Dict[str, str]) -> Tuple[List[Dict[str, Any]], List[Problem]]:
+    """Parse every catalog present in `texts`, then check ids across files."""
+    records = []  # type: List[Dict[str, Any]]
+    problems = []  # type: List[Problem]
+    for rel in CATALOG_FILES:
+        if rel in texts:
+            found, errors = parse_catalog(rel, texts[rel])
+            records.extend(found)
+            problems.extend(errors)
+    first = {}  # type: Dict[str, Dict[str, Any]]
+    for record in records:
+        earlier = first.setdefault(record["id"], record)
+        if earlier is not record:
+            problems.append((record["file"], record["line"], "duplicate id %s (first defined at %s:%d)"
+                             % (record["id"], earlier["file"], earlier["line"])))
+    for record in records:
+        for principle in record["principles"]:
+            if principle not in first:
+                problems.append((record["file"], record["line"] + 1,
+                                 "rule %s cites unknown principle %s" % (record["id"], principle)))
+    return records, problems
+
+
+# --------------------------------------------------------------------------
+# Rendering (pure)
+# --------------------------------------------------------------------------
+
+def title_of(text: str, fallback: str) -> str:
+    for line in text.split("\n"):
+        if line.startswith("# "):
+            return line[2:].strip()
+    return fallback
+
+
+def body_of(text: str) -> str:
+    """The text without its first `# Title` line."""
+    lines = text.strip().split("\n")
+    return "\n".join(lines[1:] if lines and lines[0].startswith("# ") else lines).strip()
+
+
+def bullets(records: List[Dict[str, Any]]) -> str:
+    return "\n".join("- `%s` %s" % (r["id"], r["title"]) for r in records)
+
+
+def profile_areas(profile: str) -> List[Tuple[str, str, str]]:
+    dropped = {"backend": "frontend", "frontend": "backend"}.get(profile)
+    return [area for area in AREAS if area[0] != dropped]
+
+
+def deep_dives(model: Model, profile: str, reference_dir: Optional[str]) -> str:
+    if not reference_dir:
+        return ("The lists above are titles only. The full text of every rule (rule, why, how, check) "
+                "is in the Doctrine package: run `doctrine print --tier full`.")
+    base = reference_dir.rstrip("/")
+    lines = ["The lists above are titles only. Before you apply, cite or review against a rule, "
+             "read its full text (rule, why, how, check):", ""]
+    lines += ["- %s: `%s/core/%s.md`" % (name, base, key) for key, _, name in profile_areas(profile)]
+    lines.append("- Checklists: `%s/checklists.md`" % base)
+    if model.howtos:
+        lines += ["", "How-to guides. Read the matching one before you start that kind of work:", ""]
+        lines += ["- `%s/%s`: %s" % (base, rel, title_of(model.texts[rel], rel)) for rel in model.howtos]
+    return "\n".join(lines)
+
+
+def render(model: Model, tier: str, profile: str = "fullstack",
+           reference_dir: Optional[str] = DEFAULT_REFERENCE_DIR) -> str:
+    """Render one tier of the package. Deterministic; `\\n` newlines; one trailing newline."""
+    if tier not in TIERS:
+        raise ValueError("unknown tier %r" % (tier,))
+    if profile not in PROFILES:
+        raise ValueError("unknown profile %r" % (profile,))
+    areas = profile_areas(profile)
+    parts = ["# Doctrine %s v%s" % (tier, model.version)]
+    if tier == "full":
+        docs = ["core/operating.md"] + ["core/%s.md" % key for key, _, _ in areas]
+        docs += ["core/checklists.md"] + model.howtos
+        principles = len(model.in_area("principles"))
+        rules = sum(len(model.in_area(key)) for key, _, _ in areas) - principles
+        parts.append("Version %s. %d principles, %d rules. Generated from `core/` and `howto/`; "
+                     "edit those, never this text." % (model.version, principles, rules))
+        parts.append("## Contents\n\n" + "\n".join(
+            "%d. %s (`%s`)" % (number, title_of(model.texts[rel], rel), rel) for number, rel in enumerate(docs, 1)))
+        for rel in docs:
+            parts += ["---", model.texts[rel].strip()]
+        return "\n\n".join(parts) + "\n"
+    parts.append(body_of(model.texts["core/operating.md"]))
+    if tier == "micro":
+        parts += ["## Principles", bullets(model.in_area("principles", "micro")), "## Rules"]
+        for key, _, name in areas[1:]:
+            chosen = model.in_area(key, "micro")
+            if chosen:
+                parts += ["### " + name, bullets(chosen)]
+    else:
+        for key, _, name in areas:
+            chosen = model.in_area(key)
+            if chosen:
+                parts += ["## " + name, bullets(chosen)]
+        parts += ["## Deep dives", deep_dives(model, profile, reference_dir)]
+    return "\n\n".join(part for part in parts if part) + "\n"
+
+
+def render_checklists(model: Model) -> str:
+    """core/checklists.md followed by the Check question of every rule, grouped by area."""
+    parts = [model.texts["core/checklists.md"].strip(), "## Rule checks"]
+    for key, _, name in AREAS:
+        checks = [r for r in model.in_area(key) if r["check"]]
+        if checks:
+            parts += ["### " + name, "\n".join("- [ ] `%s` %s" % (r["id"], r["check"]) for r in checks)]
+    return "\n\n".join(parts) + "\n"
+
+
+def render_rules_json(model: Model) -> str:
+    return json.dumps({"version": model.version, "rules": model.records}, indent=2, ensure_ascii=False) + "\n"
+
+
+def yaml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    text = str(value)
+    plain = (re.match(r"^(?:[A-Za-z_/~]|\.[A-Za-z_/])", text) and text == text.strip()
+             and not re.search(r"[:#*{}\[\],&!|>'\"%@\x00-\x1f]", text)
+             and text.lower() not in ("true", "false", "null", "yes", "no", "on", "off", "~"))
+    if plain:
+        return text
+    return '"%s"' % text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t")
+
+
+def render_frontmatter(data: Optional[Dict[str, Any]]) -> str:
+    """YAML front matter for a `file` target; empty string when there is none."""
+    if not data:
+        return ""
+    lines = ["---"]
+    for key, value in data.items():
+        if isinstance(value, list) and value:
+            lines.append("%s:" % key)
+            lines += ["  - " + yaml_scalar(item) for item in value]
+        else:
+            lines.append("%s: %s" % (key, "[]" if isinstance(value, list) else yaml_scalar(value)))
+    return "\n".join(lines + ["---"]) + "\n"
+
+
+def fit_tier(render_tier: Callable[[str], str], tier: str, max_chars: Optional[int]) -> Tuple[str, str]:
+    """Return (tier, text) for the largest tier at or below `tier` that fits `max_chars`."""
+    size = 0
+    for candidate in reversed(TIERS[:TIERS.index(tier) + 1]):
+        text = render_tier(candidate)
+        size = len(text)
+        if max_chars is None or size <= max_chars:
+            return candidate, text
+    raise DoctrineError("the micro tier is %d characters, over the limit of %s" % (size, max_chars))
+
+
+# --------------------------------------------------------------------------
+# Registry: validation, normalization, path expansion, guide (pure)
+# --------------------------------------------------------------------------
+
+def relative_path_problem(value: Any) -> Optional[str]:
+    if not isinstance(value, str) or not value.strip():
+        return "must be a non-empty string"
+    if value.startswith(("/", "\\", "~", "{")) or re.match(r"^[A-Za-z]:", value):
+        return "must be a relative path (got %s)" % json.dumps(value)
+    if ".." in re.split(r"[\\/]", value):
+        return "must not contain `..` (got %s)" % json.dumps(value)
+    return None
+
+
+def anchored_path_problem(value: Any) -> Optional[str]:
+    if not isinstance(value, str) or not value.strip():
+        return "must be a non-empty string"
+    if not (value == "~" or value.startswith("~/") or re.match(r"^\{[a-z_]+\}(?:/|$)", value)):
+        return "must be anchored at ~ or a {variable} (got %s)" % json.dumps(value)
+    for name in re.findall(r"\{([^}]*)\}", value):
+        if name not in PATH_VARIABLES:
+            return "unknown path variable {%s} (known: %s)" % (name, ", ".join(PATH_VARIABLES))
+    if ".." in re.split(r"[\\/]", value):
+        return "must not contain `..` (got %s)" % json.dumps(value)
+    return None
+
+
+def _is_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _is_text_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _is_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _target_problems(target: Any, name: str, anchored: bool) -> List[str]:
+    """Problems in one install target (project, global or workspace)."""
+    if not isinstance(target, dict):
+        return ["%s: must be an object" % name]
+    out = []  # type: List[str]
+
+    def need(ok: Any, message: str) -> None:
+        if not ok:
+            out.append("%s%s" % (name, message))
+
+    path_problem = anchored_path_problem if anchored else relative_path_problem
+    need(not path_problem(target.get("path")), ".path: %s" % path_problem(target.get("path")))
+    mode = target.get("mode")
+    need(mode in MODES, ".mode: unknown mode %s (expected %s)" % (json.dumps(mode), ", ".join(MODES)))
+    need(target.get("comment", "html") in COMMENTS, ".comment: must be html or hash")
+    front = target.get("frontmatter")
+    if front is not None:
+        need(mode == "file" or mode not in MODES, ".frontmatter: only a `file` target can carry front matter")
+        need(isinstance(front, dict) and all(
+            re.match(r"^[A-Za-z_][A-Za-z0-9_-]*$", key) and (isinstance(value, (bool, int, float, str)) or _is_text_list(value))
+            for key, value in front.items()),
+            ".frontmatter: must map plain keys to booleans, numbers, strings or lists of strings")
+    platform_paths = target.get("platform_paths")
+    if platform_paths is not None:
+        need(anchored and isinstance(platform_paths, dict), ".platform_paths: must be an object, on the global target only")
+        for platform, path in sorted(platform_paths.items()) if isinstance(platform_paths, dict) else []:
+            need(platform in PLATFORMS, ".platform_paths: unknown platform %s" % json.dumps(platform))
+            need(not anchored_path_problem(path), ".platform_paths.%s: %s" % (platform, anchored_path_problem(path)))
+    return out
+
+
+def _agent_problems(agent: Dict[str, Any]) -> List[str]:
+    """Problems in one registry entry whose id is already known to be well formed."""
+    out = []  # type: List[str]
+
+    def need(ok: Any, message: str) -> None:
+        if not ok:
+            out.append(message)
+
+    need(_is_text(agent.get("name")), "name: must be a non-empty string")
+    need(_is_text(agent.get("vendor")), "vendor: must be a non-empty string")
+    need(agent.get("kind") in ("agent", "runtime"), "kind: must be agent or runtime")
+    need(_is_count(agent.get("rank")), "rank: must be a positive integer")
+    detect = agent.get("detect")
+    if isinstance(detect, dict) and all(_is_text_list(detect.get(key, [])) for key in ("commands", "paths", "project_paths")):
+        for value in detect.get("paths", []):
+            need(not anchored_path_problem(value), "detect.paths: %s" % anchored_path_problem(value))
+        for value in detect.get("project_paths", []):
+            need(not relative_path_problem(value), "detect.project_paths: %s" % relative_path_problem(value))
+    else:
+        need(False, "detect: must be an object with the string lists commands, paths and project_paths")
+    out.extend(_target_problems(agent.get("project"), "project", False))
+    if agent.get("global") is None:
+        need(_is_text(agent.get("global_unsupported_reason")), "global_unsupported_reason: required when global is null")
+    else:
+        out.extend(_target_problems(agent["global"], "global", True))
+    workspace = agent.get("workspace")
+    if not isinstance(workspace, dict) or not isinstance(workspace.get("supported"), bool):
+        need(False, "workspace: must be an object with a boolean `supported`")
+    elif workspace["supported"]:
+        out.extend(_target_problems(workspace, "workspace", False))
+    else:
+        need(_is_text(workspace.get("reason")), "workspace.reason: required when workspace.supported is false")
+    register = agent.get("register")
+    if register is not None:
+        need(isinstance(register, dict), "register: must be null or an object")
+        register = register if isinstance(register, dict) else {}
+        need(not relative_path_problem(register.get("file")), "register.file: %s" % relative_path_problem(register.get("file")))
+        need(register.get("comment") in COMMENTS, "register.comment: must be html or hash")
+        need(_is_text(register.get("yaml_list_key")), "register.yaml_list_key: must be a non-empty string")
+    need(agent.get("max_chars") is None or _is_count(agent["max_chars"]), "max_chars: must be null or a positive integer")
+    need(isinstance(agent.get("reads_agents_md"), bool), "reads_agents_md: must be true or false")
+    for key in ("also_reads", "notes"):
+        need(_is_text_list(agent.get(key, [])), "%s: must be a list of strings" % key)
+    for key in ("verify", "oneshot", "local_models"):
+        need(agent.get(key) is None or isinstance(agent[key], str), "%s: must be a string or null" % key)
+    confidence = agent.get("confidence")
+    need(confidence in ("high", "medium"), "confidence: must be high or medium")
+    sources = agent.get("sources")
+    need(isinstance(sources, list), "sources: must be a list")
+    need(sources or confidence != "high", "sources: an agent with confidence high needs at least one source")
+    for index, source in enumerate(sources if isinstance(sources, list) else []):
+        need(isinstance(source, dict) and re.match(r"^https?://\S+$", str(source.get("url", "")))
+             and _is_text(source.get("quote")) and DATE_RE.match(str(source.get("accessed", ""))),
+             "sources[%d]: needs an http(s) url, a quote and an accessed date YYYY-MM-DD" % index)
+    return out
+
+
+def validate_registry(data: Any) -> List[Tuple[Optional[str], str]]:
+    """Check registry data against the schema. Returns (agent id or None, message) pairs."""
+    if not isinstance(data, dict):
+        return [(None, "the registry must be a JSON object")]
+    out = []  # type: List[Tuple[Optional[str], str]]
+    if data.get("schema") != 1:
+        out.append((None, "schema: must be 1"))
+    if not DATE_RE.match(str(data.get("verified_on", ""))):
+        out.append((None, "verified_on: must be a date YYYY-MM-DD"))
+    agents = data.get("agents")
+    if not isinstance(agents, list) or not agents:
+        return out + [(None, "agents: must be a non-empty list")]
+    seen = set()  # type: set
+    for index, agent in enumerate(agents):
+        agent_id = agent.get("id") if isinstance(agent, dict) else None
+        if not isinstance(agent_id, str) or not AGENT_ID_RE.match(agent_id):
+            out.append((None, "agents[%d]: must be an object whose id matches [a-z0-9][a-z0-9-]*" % index))
+            continue
+        if agent_id in RESERVED_AGENT_IDS:
+            out.append((agent_id, "id: %s is reserved" % agent_id))
+        if agent_id in seen:
+            out.append((agent_id, "duplicate id %s" % agent_id))
+        seen.add(agent_id)
+        out += [(agent_id, message) for message in _agent_problems(agent)]
+    return out
+
+
+def normalize_registry(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Fill optional keys with their defaults and order agents by rank. Input must be valid."""
+    defaults = (("register", None), ("max_chars", None), ("also_reads", []), ("notes", []),
+                ("verify", None), ("oneshot", None), ("local_models", None))
+    agents = []
+    for agent in data["agents"]:
+        entry = dict(agent)
+        for key, value in defaults:
+            entry.setdefault(key, value)
+        for key in ("project", "global", "workspace"):
+            if entry.get(key) and entry[key].get("supported", True):
+                entry[key] = dict({"frontmatter": None, "comment": "html"}, **entry[key])
+        agents.append(entry)
+    agents.sort(key=lambda entry: (entry["rank"], entry["id"]))
+    return {"schema": data["schema"], "verified_on": data["verified_on"], "agents": agents}
+
+
+def expand_path(template: str, platform: str, env: Dict[str, str]) -> str:
+    """Expand ~, {xdg_config}, {vscode_user} and {appdata} for one platform."""
+    if platform not in PLATFORMS:
+        raise ValueError("unknown platform %r" % (platform,))
+    home = env.get("HOME") or ""
+    xdg = env.get("XDG_CONFIG_HOME") or home + "/.config"
+    appdata = env.get("APPDATA") or home + "/AppData/Roaming"
+    vscode = {"darwin": home + "/Library/Application Support/Code/User",
+              "linux": xdg + "/Code/User", "windows": appdata + "/Code/User"}[platform]
+    path = home + template[1:] if template == "~" or template.startswith("~/") else template
+    return path.replace("{xdg_config}", xdg).replace("{vscode_user}", vscode).replace("{appdata}", appdata)
+
+
+def global_template(agent: Dict[str, Any], platform: str) -> Optional[str]:
+    """The agent's unexpanded global path for a platform, or None when it has no global target."""
+    target = agent.get("global")
+    if not target:
+        return None
+    return (target.get("platform_paths") or {}).get(platform, target["path"])
+
+
+def find_agent(registry: Dict[str, Any], agent_id: str) -> Dict[str, Any]:
+    for agent in registry["agents"]:
+        if agent["id"] == agent_id:
+            return agent
+    raise DoctrineError("unknown agent %s (known: %s)" % (agent_id, ", ".join(a["id"] for a in registry["agents"])))
+
+
+def _target_cell(target: Optional[Dict[str, Any]]) -> str:
+    if not target or target.get("supported") is False:
+        return "not supported"
+    return "`%s` (%s)" % (target["path"].replace("|", "\\|"), target["mode"])
+
+
+def _install_command(agent: Dict[str, Any], target: Dict[str, Any], scope_flags: str) -> str:
+    base = " --base MODEL" if target["mode"] == "modelfile" else ""
+    return "doctrine install --agent %s%s%s" % (agent["id"], scope_flags, base)
+
+
+def render_agent_section(agent: Dict[str, Any]) -> str:
+    reads = ["- Project: %s" % _target_cell(agent["project"])]
+    commands = [_install_command(agent, agent["project"], "")]
+    after = []
+    target = agent.get("global")
+    if target:
+        extra = "".join("; %s: `%s`" % (name, path) for name, path in sorted((target.get("platform_paths") or {}).items()))
+        reads.append("- Global: %s%s" % (_target_cell(target), extra))
+        commands.append(_install_command(agent, target, " --scope global"))
+    else:
+        reads.append("- Global: not supported. %s" % agent["global_unsupported_reason"])
+    workspace = agent["workspace"]
+    if workspace["supported"]:
+        reads.append("- Workspace: %s" % _target_cell(workspace))
+        commands.append(_install_command(agent, workspace, " --scope workspace --path DIR"))
+    else:
+        reads.append("- Workspace: not supported. %s" % workspace["reason"])
+        commands.append(_install_command(agent, agent["project"], " --scope workspace --path DIR --each-repo"))
+    if agent["reads_agents_md"]:
+        reads.append("- Reads `AGENTS.md` natively.")
+    if agent["also_reads"]:
+        reads.append("- Also reads: %s." % ", ".join("`%s`" % item for item in agent["also_reads"]))
+    if agent["max_chars"]:
+        reads.append("- Limit: %d characters. The installer falls back to a smaller tier when the text does not fit." % agent["max_chars"])
+    if agent["sources"]:
+        reads.append("- Sources: %s." % ", ".join("[%d](%s)" % (n, s["url"]) for n, s in enumerate(agent["sources"], 1)))
+    if agent["register"]:
+        after.append("The installer also registers the target in `%s` under the `%s:` list." % (
+            agent["register"]["file"], agent["register"]["yaml_list_key"]))
+    parts = ["### %s (`%s`)" % (agent["name"], agent["id"]),
+             "%s. Kind: %s. Confidence: %s." % (agent["vendor"], agent["kind"], agent["confidence"]),
+             "**Reads.**\n\n" + "\n".join(reads),
+             "**Install.**\n\n```sh\n%s\n```" % "\n".join(commands)] + after
+    if agent["verify"]:
+        parts.append("**Verify.** " + agent["verify"])
+    if agent["oneshot"]:
+        parts.append("**One-shot.** `%s`" % agent["oneshot"])
+    if agent["local_models"]:
+        parts.append("**Local models.** " + agent["local_models"])
+    if agent["notes"]:
+        parts.append("**Notes.**\n\n" + "\n".join("- " + note for note in agent["notes"]))
+    return "\n\n".join(parts)
+
+
+def render_guide(head: str, tail: str, registry: Dict[str, Any]) -> str:
+    """agents/README.md: hand-written head, generated table and sections, hand-written tail."""
+    rows = ["| Agent | Project target | Global target | Workspace | Reads AGENTS.md | Limit |",
+            "|---|---|---|---|---|---|"]
+    for agent in registry["agents"]:
+        rows.append("| %s (`%s`) | %s | %s | %s | %s | %s |" % (
+            agent["name"], agent["id"], _target_cell(agent["project"]), _target_cell(agent.get("global")),
+            _target_cell(agent["workspace"]), "yes" if agent["reads_agents_md"] else "no",
+            "%d chars" % agent["max_chars"] if agent["max_chars"] else "none"))
+    parts = [head.strip(), "## Supported agents",
+             "Generated by `doctrine build` from `agents/registry.json` (paths verified on %s). "
+             "Edit the registry, never this section." % registry["verified_on"],
+             "\n".join(rows),
+             "Path variables: `~` is the home directory; `{xdg_config}` is `$XDG_CONFIG_HOME` or `~/.config`; "
+             "`{appdata}` is `%APPDATA%`; `{vscode_user}` is `~/Library/Application Support/Code/User` on macOS, "
+             "`{xdg_config}/Code/User` on Linux and `{appdata}/Code/User` on Windows."]
+    parts += [render_agent_section(agent) for agent in registry["agents"]]
+    return "\n\n".join(parts + [tail.strip()]) + "\n"
+
+
+# --------------------------------------------------------------------------
+# Lint and build (pure: they work on the loaded texts)
+# --------------------------------------------------------------------------
+
+def check_excerpts(rel: str, text: str, texts: Dict[str, str]) -> List[Problem]:
+    """Every `<!-- excerpt: PATH -->` block must be a contiguous verbatim slice of PATH."""
+    problems = []  # type: List[Problem]
+    lines = scan_lines(text)
+    for index, (number, line, kind) in enumerate(lines):
+        match = EXCERPT_RE.match(line) if kind == "text" else None
+        if not match:
+            continue
+        indent, source = len(match.group(1)), match.group(2).strip()
+        cursor = index + 1
+        while cursor < len(lines) and lines[cursor][2] == "text" and not lines[cursor][1].strip():
+            cursor += 1
+        if cursor >= len(lines) or lines[cursor][2] != "open":
+            problems.append((rel, number, "excerpt comment is not followed by a fenced code block"))
+            continue
+        block = []
+        cursor += 1
+        while cursor < len(lines) and lines[cursor][2] == "code":
+            raw = lines[cursor][1]
+            block.append((raw[indent:] if not raw[:indent].strip() else raw).rstrip())
+            cursor += 1
+        if relative_path_problem(source):
+            problems.append((rel, number, "excerpt path %s" % relative_path_problem(source)))
+        elif source not in texts:
+            problems.append((rel, number, "excerpt source %s does not exist" % source))
+        elif not any(block):
+            problems.append((rel, number, "excerpt of %s is empty" % source))
+        else:
+            wanted = [item.rstrip() for item in texts[source].split("\n")]
+            size = len(block)
+            if not any(wanted[start:start + size] == block for start in range(len(wanted) - size + 1)):
+                problems.append((rel, number, "excerpt is not a contiguous verbatim slice of %s" % source))
+    return problems
+
+
+def check_hygiene(rel: str, text: str) -> List[Problem]:
+    """No access key ids, private key headers or real-looking email addresses."""
+    problems = []  # type: List[Problem]
+    for number, line in enumerate(text.split("\n"), 1):
+        if rel == REGISTRY_FILE:
+            line = QUOTE_VALUE_RE.sub('""', line)
+        if "AKIA" in line and AWS_KEY_RE.search(line):
+            problems.append((rel, number, "text hygiene: looks like an access key id (AKIA...)"))
+        if "PRIVATE KEY" in line and PRIVATE_KEY_RE.search(line):
+            problems.append((rel, number, "text hygiene: private key header"))
+        if "@" in line:
+            for match in EMAIL_RE.finditer(line):
+                if match.group(1).lower() not in EXAMPLE_DOMAINS:
+                    problems.append((rel, number, "text hygiene: email address at %s (only %s are allowed)"
+                                     % (match.group(1), ", ".join(EXAMPLE_DOMAINS))))
+    return problems
+
+
+def parse_registry_text(raw: str) -> Tuple[Any, Optional[Tuple[int, str]]]:
+    try:
+        return json.loads(raw), None
+    except ValueError as error:
+        return None, (getattr(error, "lineno", 1), "invalid JSON: %s" % error)
+
+
+def registry_problems(raw: str) -> List[Problem]:
+    data, error = parse_registry_text(raw)
+    if error:
+        return [(REGISTRY_FILE, error[0], error[1])]
+    problems = []  # type: List[Problem]
+    lines = raw.split("\n")
+    for agent_id, message in validate_registry(data):
+        number = 1
+        if agent_id:
+            pattern = re.compile(r'"id"\s*:\s*"%s"' % re.escape(agent_id))
+            number = next((n for n, line in enumerate(lines, 1) if pattern.search(line)), 1)
+            message = "agent %s: %s" % (agent_id, message)
+        problems.append((REGISTRY_FILE, number, message))
+    return problems
+
+
+def is_doc(rel: str) -> bool:
+    return bool(re.match(r"^(?:core|howto)/[^/]+\.md$", rel))
+
+
+def lint(texts: Dict[str, str]) -> List[Problem]:
+    """Every check `doctrine lint` runs, over the package's text files keyed by relative path."""
+    problems = [(rel, 1, "required file is missing") for rel in REQUIRED_FILES if rel not in texts]  # type: List[Problem]
+    version = texts.get("VERSION", "").strip()
+    if "VERSION" in texts and not VERSION_RE.match(version):
+        problems.append(("VERSION", 1, "must hold a version like 0.1.0"))
+    records, catalog_problems = parse_catalogs(texts)
+    problems += catalog_problems
+    known = set(record["id"] for record in records)
+    for rel in sorted(texts):
+        if is_doc(rel):
+            for number, line in enumerate(texts[rel].split("\n"), 1):
+                for match in BACKTICK_ID_RE.finditer(line):
+                    if match.group(1) not in known:
+                        problems.append((rel, number, "unknown rule id `%s`" % match.group(1)))
+        if is_doc(rel) or rel == "README.md":
+            problems += check_excerpts(rel, texts[rel], texts)
+        problems += check_hygiene(rel, texts[rel])
+    if all(rel in texts for rel in REQUIRED_CORE):
+        model = Model(version, texts, records)
+        for rel, tier, profile in DIST_TIERS:
+            size = len(render(model, tier, profile))
+            if profile == "fullstack" and size > BUDGETS.get(tier, size):
+                problems.append((rel, 1, "%s %s is %d characters, over the budget of %d"
+                                 % (tier, profile, size, BUDGETS[tier])))
+    if REGISTRY_FILE in texts:
+        problems += registry_problems(texts[REGISTRY_FILE])
+    return sorted(set(problems))
+
+
+def build_model(texts: Dict[str, str]) -> Model:
+    """Parse the texts into a Model; raise DoctrineError when the package cannot be rendered."""
+    missing = [rel for rel in ("VERSION",) + REQUIRED_CORE if rel not in texts]
+    if missing:
+        raise DoctrineError("the package is incomplete, missing: %s" % ", ".join(missing))
+    records, problems = parse_catalogs(texts)
+    if problems:
+        raise DoctrineError("the rule catalog has %d problem(s), first: %s:%d: %s (run `doctrine lint`)"
+                            % ((len(problems),) + problems[0]))
+    return Model(texts["VERSION"].strip(), texts, records)
+
+
+def build_registry(texts: Dict[str, str]) -> Dict[str, Any]:
+    """Parse, validate and normalize the registry; raise DoctrineError when it is unusable."""
+    if REGISTRY_FILE not in texts:
+        raise DoctrineError("%s is missing" % REGISTRY_FILE)
+    problems = registry_problems(texts[REGISTRY_FILE])
+    if problems:
+        raise DoctrineError("%s is invalid: %s%s" % (REGISTRY_FILE, problems[0][2],
+                            " (and %d more; run `doctrine lint`)" % (len(problems) - 1) if len(problems) > 1 else ""))
+    return normalize_registry(json.loads(texts[REGISTRY_FILE]))
+
+
+def build_guide(texts: Dict[str, str]) -> str:
+    missing = [rel for rel in GUIDE_FILES if rel not in texts]
+    if missing:
+        raise DoctrineError("the package is incomplete, missing: %s" % ", ".join(missing))
+    return render_guide(texts[GUIDE_FILES[0]], texts[GUIDE_FILES[1]], build_registry(texts))
+
+
+def build_outputs(texts: Dict[str, str]) -> List[Tuple[str, str]]:
+    """Every generated file as (relative path, content), in a stable order."""
+    model = build_model(texts)
+    outputs = [(rel, render(model, tier, profile)) for rel, tier, profile in DIST_TIERS]
+    outputs.append(("dist/checklists.md", render_checklists(model)))
+    outputs.append(("dist/rules.json", render_rules_json(model)))
+    outputs.append(("agents/README.md", build_guide(texts)))
+    return outputs
+
+
+# --------------------------------------------------------------------------
+# I/O: package loading, environment, output
+# --------------------------------------------------------------------------
+
+def package_root() -> Path:
+    override = os.environ.get("DOCTRINE_PKG")
+    root = Path(override) if override else Path(__file__).resolve().parent.parent
+    if not root.is_dir():
+        raise DoctrineError("package root %s is not a directory (check DOCTRINE_PKG)" % root)
+    return root
+
+
+def read_text(path: Path) -> Optional[str]:
+    """The file as text with `\\n` newlines, or None when it is absent or not UTF-8 text."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    if b"\0" in data:
+        return None
+    try:
+        return data.decode("utf-8").replace("\r\n", "\n")
+    except UnicodeDecodeError:
+        return None
+
+
+def load_texts(root: Path, everything: bool = False) -> Dict[str, str]:
+    """Read the package into memory: the sources by default, every text file when `everything`."""
+    texts = {}  # type: Dict[str, str]
+    paths = [root / "VERSION", root / REGISTRY_FILE] + [root / rel for rel in GUIDE_FILES]
+    if everything:
+        paths = []
+        for folder, dirs, files in os.walk(str(root)):
+            dirs[:] = sorted(name for name in dirs if name not in SKIP_DIRS)
+            paths += [Path(folder) / name for name in sorted(files)]
+    else:
+        for sub in ("core", "howto"):
+            paths += sorted((root / sub).glob("*.md"))
+    for path in paths:
+        text = read_text(path)
+        if text is not None:
+            texts[path.relative_to(root).as_posix()] = text
+    return texts
+
+
+def current_platform() -> str:
+    override = os.environ.get("DOCTRINE_PLATFORM")
+    if override:
+        if override not in PLATFORMS:
+            raise DoctrineError("DOCTRINE_PLATFORM must be one of %s (got %s)" % (", ".join(PLATFORMS), override))
+        return override
+    if sys.platform == "darwin":
+        return "darwin"
+    return "windows" if sys.platform.startswith(("win", "cygwin")) else "linux"
+
+
+def path_env() -> Dict[str, str]:
+    """The environment values path expansion depends on."""
+    home = os.environ.get("HOME") or os.environ.get("USERPROFILE") or os.path.expanduser("~")
+    return {"HOME": home, "XDG_CONFIG_HOME": os.environ.get("XDG_CONFIG_HOME", ""),
+            "APPDATA": os.environ.get("APPDATA", "")}
+
+
+def environment() -> Dict[str, str]:
+    """The whole environment, as a plain dict: installs need HOME, PATH and XDG_CONFIG_HOME."""
+    return dict(os.environ)
+
+
+def write_text(path: Path, text: str) -> bool:
+    """Write atomically, creating parents. Returns False (and writes nothing) when unchanged."""
+    data = text.encode("utf-8")
+    try:
+        if path.read_bytes() == data:
+            return False
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp-%d" % os.getpid())
+    temporary.write_bytes(data)
+    os.replace(str(temporary), str(path))
+    return True
+
+
+def emit(text: str, stream: Any = None) -> None:
+    stream = stream or sys.stdout
+    if not text.endswith("\n"):
+        text += "\n"
+    buffer = getattr(stream, "buffer", None)
+    if buffer is not None:
+        stream.flush()
+        buffer.write(text.encode("utf-8"))
+        buffer.flush()
+    else:
+        stream.write(text)
+
+
+# --------------------------------------------------------------------------
+# Commands
+# --------------------------------------------------------------------------
+
+def cmd_version(args: argparse.Namespace) -> int:
+    version = (read_text(package_root() / "VERSION") or "").strip()
+    if not version:
+        raise DoctrineError("VERSION is missing from %s" % package_root())
+    emit("%s %s" % (PROG, version))
+    return 0
+
+
+def cmd_lint(args: argparse.Namespace) -> int:
+    texts = load_texts(package_root(), everything=True)
+    problems = lint(texts)
+    if args.json:
+        emit(json.dumps({"ok": not problems, "problems": [
+            {"file": rel, "line": number, "message": message} for rel, number, message in problems]}, indent=2))
+    elif problems:
+        emit("\n".join("%s:%d: %s" % problem for problem in problems))
+        emit("lint: %d problem(s) in %s" % (len(problems), package_root()), sys.stderr)
+    else:
+        emit("lint: ok (%d text files)" % len(texts))
+    return 1 if problems else 0
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    root = package_root()
+    texts = load_texts(root, everything=True)
+    problems = lint(texts)
+    if problems:
+        emit("\n".join("%s:%d: %s" % problem for problem in problems))
+        emit("build: lint failed with %d problem(s); nothing written" % len(problems), sys.stderr)
+        return 1
+    stale = []
+    for rel, content in build_outputs(texts):
+        if args.check:
+            current = None  # type: Optional[bytes]
+            try:
+                current = (root / rel).read_bytes()
+            except OSError:
+                pass
+            if current != content.encode("utf-8"):
+                stale.append(rel)
+                emit("%s: %s" % (rel, "missing" if current is None else "differs from the sources"))
+        else:
+            emit("%s %s" % ("wrote" if write_text(root / rel, content) else "unchanged", rel))
+    if stale:
+        emit("build --check: %d generated file(s) out of date; run `doctrine build`" % len(stale), sys.stderr)
+        return 1
+    if args.check:
+        emit("build --check: ok")
+    return 0
+
+
+def cmd_print(args: argparse.Namespace) -> int:
+    texts = load_texts(package_root())
+    model = build_model(texts)
+    prefix, limit = "", None
+    if args.agent:
+        agent = find_agent(build_registry(texts), args.agent)
+        limit = agent["max_chars"]
+        if agent["project"]["mode"] == "file":
+            prefix = render_frontmatter(agent["project"].get("frontmatter"))
+    tier, text = fit_tier(lambda name: render(model, name, args.profile, args.reference_dir), args.tier, limit)
+    if tier != args.tier:
+        emit("%s: %s does not fit the %d character limit of %s; printing %s"
+             % (PROG, args.tier, limit, args.agent, tier), sys.stderr)
+    emit(prefix + text)
+    return 0
+
+
+def cmd_agents(args: argparse.Namespace) -> int:
+    texts = load_texts(package_root())
+    if args.markdown:
+        emit(build_guide(texts))
+        return 0
+    registry = build_registry(texts)
+    platform, env = current_platform(), path_env()
+    if args.json:
+        agents = []
+        for agent in registry["agents"]:
+            template = global_template(agent, platform)
+            agents.append(dict(agent, resolved={"global": expand_path(template, platform, env) if template else None}))
+        emit(json.dumps(dict(registry, platform=platform, agents=agents), indent=2, ensure_ascii=False))
+        return 0
+    rows = [("ID", "NAME", "KIND", "PROJECT", "GLOBAL")]
+    for agent in registry["agents"]:
+        rows.append((agent["id"], agent["name"], agent["kind"], agent["project"]["path"],
+                     global_template(agent, platform) or "-"))
+    widths = [max(len(row[column]) for row in rows) for column in range(len(rows[0]))]
+    emit("\n".join("  ".join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip() for row in rows))
+    return 0
+
+
+# --------------------------------------------------------------------------
+# Install lifecycle: managed blocks, targets, the manifest (pure + thin I/O)
+# --------------------------------------------------------------------------
+
+MANAGED_RE = re.compile(r"doctrine:managed version=(\S+) tier=(\S+) profile=(\S+) sha256=([0-9a-f]{12})")
+ATTR_RE = re.compile(r"([a-z_]+)=([^\s]+)")
+INSTALL_KEYS = ("agent", "scope", "root", "target", "mode", "tier", "profile", "reference_dir",
+                "created_files", "created_dirs", "local", "version", "sha256", "installed_at")
+
+
+def short_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def utc_stamp() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime(BACKUP_STAMP_RE)
+
+
+def parse_attributes(line: str) -> Dict[str, str]:
+    """The key=value pairs on a doctrine:begin marker line."""
+    tail = line.split("doctrine:begin", 1)[-1]
+    tail = tail.replace("-->", " ").replace("#", " ")
+    return dict(ATTR_RE.findall(tail))
+
+
+def block_open(comment: str, version: str, tier: str, profile: str, digest: str, pad: int) -> str:
+    body = "doctrine:begin version=%s tier=%s profile=%s sha256=%s pad=%d" % (version, tier, profile, digest, pad)
+    return "# %s" % body if comment == "hash" else "<!-- %s -->" % body
+
+
+def block_close(comment: str) -> str:
+    return "# doctrine:end" if comment == "hash" else "<!-- doctrine:end -->"
+
+
+def block_bounds(lines: List[str]) -> Optional[Tuple[int, int, Dict[str, str]]]:
+    """(begin index, end index, attributes) for the single managed block, or None."""
+    begin = None  # type: Optional[int]
+    for index, line in enumerate(lines):
+        if begin is None:
+            if "doctrine:begin" in line:
+                begin = index
+        elif "doctrine:end" in line:
+            return begin, index, parse_attributes(lines[begin])
+    return None
+
+
+def current_pad(text: str) -> Optional[int]:
+    """The pad recorded on the existing block, or None when there is no block."""
+    bounds = block_bounds(text.splitlines(True))
+    if bounds is None:
+        return None
+    try:
+        return int(bounds[2].get("pad", "0"))
+    except ValueError:
+        return 0
+
+
+def next_pad(text: str) -> int:
+    """Newline characters to insert before a block appended to this text."""
+    if not text or text.endswith(("\n", "\r")):
+        return 0
+    return 2 if "\r\n" in text else 1
+
+
+def place_block(text: str, block: str, pad: int) -> Tuple[str, str]:
+    """Insert or replace the block. Returns (new text, action)."""
+    newline = "\r\n" if "\r\n" in text else "\n"
+    payload = block.replace("\n", newline)
+    lines = text.splitlines(True)
+    bounds = block_bounds(lines)
+    if bounds is not None:
+        begin, end, _ = bounds
+        return "".join(lines[:begin]) + payload + "".join(lines[end + 1:]), "replaced"
+    if not text:
+        return payload, "created"
+    return text + (newline if pad else "") + payload, "appended"
+
+
+def strip_block(text: str, pad: int) -> Tuple[str, bool]:
+    """Remove the block and the newline characters the installer inserted before it."""
+    lines = text.splitlines(True)
+    bounds = block_bounds(lines)
+    if bounds is None:
+        return text, False
+    begin, end, _ = bounds
+    before = "".join(lines[:begin])
+    after = "".join(lines[end + 1:])
+    if pad:
+        before = before[:len(before) - pad] if pad <= len(before) else ""
+    return before + after, True
+
+
+def block_body(text: str) -> Optional[str]:
+    """The rendered text inside the managed block, or None."""
+    bounds = block_bounds(text.splitlines(True))
+    if bounds is None:
+        return None
+    begin, end, _ = bounds
+    return "".join(text.splitlines(True)[begin + 1:end])
+
+
+def render_block(rendered: str, comment: str, pad: int, version: str, tier: str, profile: str, digest: str) -> str:
+    return "%s\n%s%s\n" % (block_open(comment, version, tier, profile, digest, pad),
+                           rendered if rendered.endswith("\n") else rendered + "\n",
+                           block_close(comment))
+
+
+def managed_attributes(text: str) -> Optional[Dict[str, str]]:
+    match = MANAGED_RE.search(text)
+    if not match:
+        return None
+    return {"version": match.group(1), "tier": match.group(2), "profile": match.group(3), "sha256": match.group(4)}
+
+
+def render_file_target(rendered: str, frontmatter: Optional[Dict[str, Any]], version: str, tier: str,
+                       profile: str, digest: str) -> str:
+    marker = "<!-- doctrine:managed version=%s tier=%s profile=%s sha256=%s -->\n" % (version, tier, profile, digest)
+    return render_frontmatter(frontmatter) + marker + rendered
+
+
+def unified_diff(rel: str, before: str, after: str) -> str:
+    return "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True),
+                                        fromfile=rel, tofile=rel))
+
+
+def reference_index(model: Model) -> str:
+    lines = ["# Doctrine reference", "",
+             "A copy of the Doctrine rules, matching the installed tier. The rendered rule set",
+             "points here from its `## Deep dives` section.", "",
+             "## Rule catalogs", ""]
+    for key, _, name in AREAS:
+        lines.append("- `core/%s.md` — %s" % (key, name))
+    lines += ["", "## Guides", ""]
+    lines += ["- `%s`" % rel for rel in model.howtos]
+    lines += ["", "## Other files", "",
+              "- `checklists.md` — process checklists and the per-rule checks",
+              "- `rules.json` — the same rules as data",
+              "- `examples/` — the reference implementations, copied with `--with-examples`", ""]
+    return "\n".join(lines)
+
+
+def reference_files(texts: Dict[str, str], model: Model) -> Dict[str, str]:
+    """The reference directory contents, keyed by path relative to it."""
+    files = dict((rel, text) for rel, text in texts.items() if re.match(r"^(core|howto)/[^/]+\.md$", rel))
+    files["checklists.md"] = render_checklists(model)
+    files["rules.json"] = render_rules_json(model)
+    files["README.md"] = reference_index(model)
+    return files
+
+
+def entry_of(agent_id: str, scope: str, root: str, target: str, mode: str, tier: str, profile: str,
+             reference_dir: Optional[str], created_files: List[str], created_dirs: List[str],
+             local: bool, version: str, digest: str, register_file: Optional[str] = None) -> Dict[str, Any]:
+    entry = {"agent": agent_id, "scope": scope, "root": root, "target": target, "mode": mode,
+             "tier": tier, "profile": profile, "reference_dir": reference_dir,
+             "created_files": sorted(set(created_files)), "created_dirs": sorted(set(created_dirs)),
+             "local": bool(local), "version": version, "sha256": digest,
+             "installed_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    if register_file:
+        entry["register_file"] = register_file
+    return entry
+
+
+def manifest_key(entry: Dict[str, Any]) -> Tuple[str, str, str, str]:
+    return (entry.get("agent", ""), entry.get("scope", ""), entry.get("root", ""), entry.get("target", ""))
+
+
+def manifest_find(data: Dict[str, Any], key: Tuple[str, str, str, str]) -> Optional[Dict[str, Any]]:
+    for entry in data.get("installs", []):
+        if manifest_key(entry) == key:
+            return entry
+    return None
+
+
+def manifest_drop(data: Dict[str, Any], key: Tuple[str, str, str, str]) -> Optional[Dict[str, Any]]:
+    for index, entry in enumerate(data.get("installs", [])):
+        if manifest_key(entry) == key:
+            return data["installs"].pop(index)
+    return None
+
+
+def manifest_path(env: Dict[str, str]) -> Path:
+    home = Path(env.get("HOME") or str(Path.home()))
+    xdg = env.get("XDG_CONFIG_HOME") or str(home / ".config")
+    return Path(xdg) / MANIFEST_REL
+
+
+def read_manifest(env: Dict[str, str]) -> Dict[str, Any]:
+    path = manifest_path(env)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"schema": MANIFEST_SCHEMA, "installs": []}
+    if not isinstance(data, dict) or not isinstance(data.get("installs"), list):
+        return {"schema": MANIFEST_SCHEMA, "installs": []}
+    return data
+
+
+def write_manifest(env: Dict[str, str], data: Dict[str, Any]) -> None:
+    path = manifest_path(env)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp-%d" % os.getpid())
+    temporary.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(str(temporary), str(path))
+
+
+def expand_agent_paths(paths: List[str], platform: str, env: Dict[str, str]) -> List[str]:
+    return [expand_path(path, platform, env) for path in paths]
+
+
+def reference_used_by_others(data: Dict[str, Any], reference: str, key: Tuple[str, str, str, str]) -> bool:
+    for entry in data.get("installs", []):
+        if manifest_key(entry) != key and entry.get("reference_dir") and entry.get("root"):
+            candidate = Path(entry["root"]) / (entry["reference_dir"].lstrip("~/") or ".")
+            if str(candidate) == reference:
+                return True
+    return False
+
+
+def on_path(command: str, env: Dict[str, str]) -> bool:
+    directories = (env.get("PATH") or "").split(os.pathsep)
+    extensions = ("", ".exe", ".cmd", ".bat") if env.get("DOCTRINE_PLATFORM") == "windows" else ("",)
+    for directory in directories:
+        if not directory:
+            continue
+        for extension in extensions:
+            candidate = Path(directory) / (command + extension)
+            if candidate.is_file() and os.access(str(candidate), os.X_OK):
+                return True
+    return False
+
+
+def detected_agents(registry: Dict[str, Any], platform: str, env: Dict[str, str],
+                    path: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Agents whose commands are on PATH, whose global path exists, or whose project files exist."""
+    found = []
+    for agent in registry["agents"]:
+        detect = agent.get("detect") or {}
+        if any(on_path(command, env) for command in detect.get("commands") or []):
+            found.append(agent)
+            continue
+        if any(Path(candidate).exists() for candidate in expand_agent_paths(detect.get("paths") or [], platform, env)):
+            found.append(agent)
+            continue
+        if path is not None:
+            if any((Path(path) / rel).exists() for rel in detect.get("project_paths") or []):
+                found.append(agent)
+    return found
+
+
+def symlink_problem(target: Path, root: Path) -> Optional[str]:
+    """A symlinked target inside the root is followed; one pointing outside is refused."""
+    if not target.is_symlink():
+        return None
+    resolved = target.resolve()
+    base = root.resolve()
+    if resolved == base or base in resolved.parents:
+        return None
+    return "%s is a symlink that points outside %s" % (target, root)
+
+
+def find_repositories(root: Path, depth: int) -> List[Path]:
+    """Git repositories at or under root, within depth levels."""
+    found = []
+    stack = [(root, 0)]
+    while stack:
+        current, level = stack.pop()
+        if (current / ".git").exists():
+            found.append(current)
+            continue
+        if level >= depth:
+            continue
+        try:
+            children = sorted(child for child in current.iterdir() if child.is_dir() and child.name not in SKIP_DIRS)
+        except OSError:
+            continue
+        for child in children:
+            stack.append((child, level + 1))
+    return sorted(found)
+
+
+def select_agents(registry: Dict[str, Any], spec: str, platform: str, env: Dict[str, str],
+                  path: Optional[Path]) -> List[Dict[str, Any]]:
+    """Resolve --agent IDS, all, detected (custom is handled by the caller)."""
+    if spec == "all":
+        return list(registry["agents"])
+    if spec == "detected":
+        return detected_agents(registry, platform, env, path)
+    return [find_agent(registry, item.strip()) for item in spec.split(",") if item.strip()]
+
+
+def scope_root(scope: str, path: Optional[str], env: Dict[str, str]) -> Path:
+    home = Path(env.get("HOME") or str(Path.home()))
+    if scope == "global":
+        return home
+    if scope == "workspace":
+        if not path:
+            raise DoctrineError("workspace scope needs --path (a directory that holds several projects)")
+        return Path(path).expanduser().resolve()
+    start = Path(path).expanduser().resolve() if path else Path.cwd()
+    top = git_output(start, "rev-parse", "--show-toplevel")
+    return Path(top) if top else start
+
+
+def target_for(agent: Dict[str, Any], scope: str, root: Path, platform: str, env: Dict[str, str]) -> Tuple[Path, Dict[str, Any]]:
+    """The file this agent's rules go into, and the registry target record."""
+    if scope == "global":
+        template = global_template(agent, platform)
+        if not template:
+            raise DoctrineError("%s has no global target: %s"
+                                % (agent["id"], agent.get("global_unsupported_reason") or "not supported"))
+        return Path(expand_path(template, platform, env)), agent["global"]
+    if scope == "workspace":
+        target = agent.get("workspace") or {}
+        if not target.get("supported"):
+            raise DoctrineError("%s has no workspace target: %s (use --each-repo)"
+                                % (agent["id"], target.get("reason") or "not supported"))
+        return root / target["path"], target
+    return root / agent["project"]["path"], agent["project"]
+
+
+def git_output(cwd: Path, *arguments: str) -> Optional[str]:
+    """Run a read-only git command. Returns stripped stdout, or None when it cannot help."""
+    try:
+        done = subprocess.run(["git"] + list(arguments), cwd=str(cwd),
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError:
+        return None
+    if done.returncode != 0:
+        return None
+    return done.stdout.decode("utf-8", "replace").strip()
+
+
+def git_path(cwd: Path, relative: str) -> Optional[Path]:
+    out = git_output(cwd, "rev-parse", "--git-path", relative)
+    if not out:
+        return None
+    path = Path(out)
+    return path if path.is_absolute() else (cwd / path)
+
+
+# --------------------------------------------------------------------------
+# Install lifecycle: the run (thin I/O)
+# --------------------------------------------------------------------------
+
+def resolve_target(path: Path) -> Path:
+    """Follow a symlinked target so a write lands in the linked file, not on the link."""
+    if not path.is_symlink():
+        return path
+    try:
+        return path.resolve()
+    except OSError:
+        return path
+
+
+def read_exact(path: Path) -> Optional[str]:
+    """Read a file as text without translating newlines, or None when it is not readable."""
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            return handle.read()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def write_exact(path: Path, text: str) -> None:
+    """Write text without translating newlines (a named temp file, then a rename)."""
+    temporary = path.with_name(path.name + ".tmp-%d" % os.getpid())
+    with temporary.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+    os.replace(str(temporary), str(path))
+
+
+class Run:
+    """One lifecycle command: the environment, what it did, and what it created."""
+
+    def __init__(self, env: Dict[str, str], dry_run: bool) -> None:
+        self.env = env
+        self.dry_run = dry_run
+        self.created_files = []  # type: List[str]
+        self.created_dirs = []  # type: List[str]
+        self.actions = []  # type: List[str]
+        self.changes = []  # type: List[Tuple[str, str, str]]
+        self.failures = []  # type: List[str]
+
+    def mkdir(self, path: Path) -> None:
+        missing = []
+        current = path
+        while not current.exists() and current != current.parent:
+            missing.append(current)
+            current = current.parent
+        for directory in reversed(missing):
+            self.created_dirs.append(str(directory))
+            self.actions.append("mkdir %s" % directory)
+            if not self.dry_run:
+                directory.mkdir(parents=True, exist_ok=True)
+
+    def write(self, path: Path, text: str) -> str:
+        """Write text, following a symlinked target. Returns created, updated or unchanged."""
+        destination = resolve_target(path)
+        before = read_exact(path)
+        if before == text:
+            return "unchanged"
+        action = "created" if before is None else "updated"
+        self.actions.append("%s %s" % (action, path))
+        if before is None:
+            self.created_files.append(str(destination))
+        else:
+            self.changes.append((str(path), before, text))
+        if not self.dry_run:
+            self.mkdir(destination.parent)
+            write_exact(destination, text)
+        return action
+
+    def copy(self, source: Path, destination: Path) -> str:
+        try:
+            data = source.read_bytes()
+        except OSError:
+            return "missing"
+        try:
+            if destination.read_bytes() == data:
+                return "unchanged"
+        except OSError:
+            pass
+        self.created_files.append(str(destination))
+        self.actions.append("copy %s" % destination)
+        if not self.dry_run:
+            self.mkdir(destination.parent)
+            shutil.copy2(str(source), str(destination))
+        return "created"
+
+    def remove(self, path: Path) -> None:
+        self.actions.append("remove %s" % path)
+        if not self.dry_run and path.is_file():
+            path.unlink()
+
+
+def install_reference(run: Run, pkg: Path, model: Model, texts: Dict[str, str], base: Path,
+                      with_examples: bool) -> None:
+    """Rewrite the reference directory as a whole."""
+    for rel, text in sorted(reference_files(texts, model).items()):
+        run.write(base / rel, text)
+    if not with_examples:
+        return
+    source = pkg / "examples"
+    if not source.is_dir():
+        return
+    for path in sorted(source.rglob("*")):
+        relative = path.relative_to(source)
+        if any(part in REFERENCE_SKIP for part in relative.parts) or not path.is_file():
+            continue
+        run.copy(path, base / "examples" / relative)
+
+
+def install_target(run: Run, model: Model, texts: Dict[str, str], agent: Dict[str, Any], scope: str,
+                   root: Path, platform: str, tier: str, profile: str, comment: str,
+                   reference: Optional[str], no_reference: bool, with_examples: bool,
+                   force: bool, base_model: Optional[str], target_path: Path,
+                   target: Dict[str, Any], local: bool) -> Tuple[str, str, str, List[str], str]:
+    """Write one target. Returns (tier used, digest, mode, created files, status)."""
+    mode = target.get("mode") or "block"
+    version = model.version
+    rendered = render(model, tier, profile, reference)
+    tier, rendered = fit_tier(lambda name: render(model, name, profile, reference), tier, agent.get("max_chars"))
+    digest = short_hash(rendered)
+    created_before = len(run.created_files)
+    changes_before = len(run.changes)
+    if mode == "block":
+        text = read_exact(target_path) or ""
+        pad = current_pad(text)
+        if pad is None:
+            pad = next_pad(text)
+        block = render_block(rendered, comment, pad, version, tier, profile, digest)
+        new_text, action = place_block(text, block, pad)
+        run.write(target_path, new_text)
+        if action == "unchanged":
+            run.actions.append("unchanged %s" % target_path)
+    elif mode == "file":
+        text = read_exact(target_path) or ""
+        if text and managed_attributes(text) is None:
+            if not force:
+                raise DoctrineError("%s is not managed by doctrine; use --force to replace it" % target_path)
+            backup = target_path.with_name(target_path.name + ".bak." + utc_stamp())
+            run.actions.append("backup %s" % backup)
+            if not run.dry_run:
+                shutil.copy2(str(target_path), str(backup))
+                run.created_files.append(str(backup))
+        run.write(target_path, render_file_target(rendered, target.get("frontmatter"), version, tier, profile, digest))
+    elif mode == "modelfile":
+        if not base_model:
+            raise DoctrineError("%s needs --base MODEL" % agent["id"])
+        run.write(target_path, "FROM %s\n\nSYSTEM \"\"\"\n%s\"\"\"\n" % (base_model, rendered))
+    else:  # text: the rendered prompt as a plain file
+        run.write(target_path, rendered)
+    created = run.created_files[created_before:]
+    if created:
+        status = "created"
+    elif len(run.changes) > changes_before:
+        status = "updated"
+    else:
+        status = "unchanged"
+    return tier, digest, mode, created, status
+
+
+def apply_register(run: Run, agent: Dict[str, Any], root: Path, target_path: Path, version: str,
+                   tier: str = "", profile: str = "") -> Optional[Dict[str, str]]:
+    """Append the target to the agent's yaml list key, or report a manual step."""
+    register = agent.get("register")
+    if not register:
+        return None
+    path = root / register["file"]
+    key = register["yaml_list_key"]
+    comment = register.get("comment") or "hash"
+    before = read_exact(path) or ""
+    existing = re.search(r"^%s:" % re.escape(key), before, re.MULTILINE)
+    if existing and block_bounds(before.splitlines(True)) is None:
+        return {"file": str(path), "manual_step": "add this line under %s:  - %s" % (key, target_path)}
+    digest = short_hash(str(target_path))
+    opener = block_open(comment, version, tier, profile, digest, next_pad(before))
+    closer = block_close(comment)
+    block = "%s\n%s:\n  - %s\n%s\n" % (opener, key, target_path, closer)
+    new_text, _ = place_block(before, block, next_pad(before))
+    run.write(path, new_text)
+    return {"file": str(path), "manual_step": None}
+
+
+def apply_exclude(run: Run, root: Path, paths: List[str], comment: str = "hash") -> None:
+    """Record the created paths in this repository's info/exclude."""
+    exclude = git_path(root, "info/exclude")
+    if exclude is None:
+        raise DoctrineError("--local needs a git repository; no info/exclude under %s" % root)
+    before = read_exact(exclude) or ""
+    pad = next_pad(before)
+    lines = "\n".join(sorted(set(paths)))
+    block = "%s\n%s\n%s\n" % (block_open(comment, "", "", "", "", pad), lines, block_close(comment))
+    new_text, _ = place_block(before, block, pad)
+    run.write(exclude, new_text)
+
+
+# --------------------------------------------------------------------------
+# Commands: detect, install, uninstall, update, status
+# --------------------------------------------------------------------------
+
+def cmd_detect(args: argparse.Namespace) -> int:
+    texts = load_texts(package_root())
+    registry = build_registry(texts)
+    platform, env = current_platform(), environment()
+    path = Path(args.path).expanduser().resolve() if args.path else None
+    found = detected_agents(registry, platform, env, path)
+    if args.json:
+        emit(json.dumps({"platform": platform, "path": str(path) if path else None,
+                         "agents": [agent["id"] for agent in found]}, indent=2))
+        return 0
+    if not found:
+        emit("detected: nothing (run `doctrine agents` to see what is supported)")
+        return 0
+    for agent in found:
+        emit("%-12s %s" % (agent["id"], agent["name"]))
+    return 0
+
+
+def plan_install(run: Run, pkg: Path, model: Model, texts: Dict[str, str], registry: Dict[str, Any],
+                 args: argparse.Namespace, platform: str, env: Dict[str, str]) -> int:
+    """Install for every selected agent and root. Returns the exit code."""
+    version = model.version
+    data = read_manifest(env)
+    if args.agent == "custom":
+        if not args.file:
+            raise DoctrineError("custom needs --file PATH")
+        agents = []  # type: List[Dict[str, Any]]
+    else:
+        agents = select_agents(registry, args.agent, platform, env, Path(args.path) if args.path else None)
+    if not agents and args.agent != "custom":
+        raise DoctrineError("no agents selected")
+
+    roots = []  # type: List[Tuple[str, Path]]
+    if args.each_repo:
+        base = scope_root("workspace", args.path, env)
+        roots = [("project", repo) for repo in find_repositories(base, args.depth)]
+        if not roots:
+            raise DoctrineError("no git repositories found under %s (depth %d)" % (base, args.depth))
+    elif args.agent == "custom":
+        roots = [("project", Path.cwd())]
+    else:
+        roots = [(args.scope, scope_root(args.scope, args.path, env))]
+
+    failures = 0
+    successes = 0
+    for scope, root in roots:
+        reference = None if args.no_reference else DEFAULT_REFERENCE_DIR
+        if scope == "global" and reference:
+            reference = "~/" + DEFAULT_REFERENCE_DIR
+        reference_base = None  # type: Optional[Path]
+        if reference:
+            reference_base = Path(expand_path(reference, platform, env)) if reference.startswith("~") \
+                else root / reference
+        for agent in agents:
+            target_path, target = target_for(agent, scope, root, platform, env)
+            comment = args.comment or target.get("comment") or "html"
+            problem = symlink_problem(target_path, root)
+            if problem and scope != "global":
+                failures += 1
+                run.failures.append("%s: %s" % (agent["id"], problem))
+                continue
+            try:
+                created_before = len(run.created_files)
+                tier, digest, mode, _created, status = install_target(
+                    run, model, texts, agent, scope, root, platform, args.tier, args.profile, comment,
+                    reference, args.no_reference, args.with_examples, args.force, args.base,
+                    target_path, target, args.local)
+                created = run.created_files[created_before:]
+                if reference_base is not None:
+                    install_reference(run, pkg, model, texts, reference_base, args.with_examples)
+                register_before = len(run.created_files)
+                register = apply_register(run, agent, root, target_path, version, tier, args.profile)
+                created += run.created_files[register_before:]
+                register_file = None  # type: Optional[str]
+                if register and register.get("manual_step") is None:
+                    register_file = register.get("file")
+                local_files = [str(target_path)]
+                if reference_base is not None:
+                    local_files.append(str(reference_base))
+                if args.local:
+                    apply_exclude(run, root, local_files + created)
+                key = (agent["id"], scope, str(root), str(target_path))
+                data["installs"] = [e for e in data.get("installs", []) if manifest_key(e) != key]
+                for sibling in data.get("installs", []):
+                    if sibling.get("target") == str(target_path):
+                        sibling["tier"], sibling["profile"] = tier, args.profile
+                        sibling["sha256"], sibling["version"] = digest, version
+                data["installs"].append(entry_of(
+                    agent["id"], scope, str(root), str(target_path), mode, tier, args.profile, reference,
+                    created, run.created_dirs, args.local, version, digest, register_file))
+                run.actions.append("%s: %s" % (agent["id"], status))
+                successes += 1
+                if register and register.get("manual_step"):
+                    run.actions.append("manual-step %s: %s" % (register["file"], register["manual_step"]))
+            except DoctrineError as error:
+                failures += 1
+                run.failures.append("%s: %s" % (agent["id"], error))
+        if args.agent == "custom" and args.file:
+            custom = Path(args.file).expanduser().resolve()
+            comment = args.comment or "html"
+            tier, digest, mode, created, _ = install_target(
+                run, model, texts, {"id": "custom", "project": {"mode": "block", "frontmatter": None},
+                                    "max_chars": None}, "custom", root, platform, args.tier, args.profile,
+                comment, reference, args.no_reference, args.with_examples, args.force, args.base,
+                custom, {"mode": "block"}, args.local)
+            key = ("custom", "custom", str(root), str(custom))
+            data["installs"] = [e for e in data.get("installs", []) if manifest_key(e) != key]
+            data["installs"].append(entry_of("custom", "custom", str(root), str(custom), mode, tier,
+                                             args.profile, reference, created, run.created_dirs,
+                                             args.local, version, digest))
+            successes += 1
+    if not run.dry_run:
+        write_manifest(env, data)
+    if not failures:
+        return 0
+    return 2 if successes else 1
+
+
+def cmd_install(args: argparse.Namespace) -> int:
+    env = environment()
+    pkg = package_root()
+    texts = load_texts(pkg)
+    model = build_model(texts)
+    registry = build_registry(texts)
+    platform = current_platform()
+    run = Run(env, args.dry_run)
+    code = plan_install(run, pkg, model, texts, registry, args, platform, env)
+    if args.json:
+        emit(json.dumps({"dry_run": args.dry_run, "actions": run.actions, "created_files": sorted(set(run.created_files)),
+                         "failures": run.failures, "exit": code}, indent=2))
+        return code
+    for action in run.actions:
+        emit(action)
+    for relative, before, after in run.changes:
+        emit(unified_diff(relative, before, after))
+    for failure in run.failures:
+        emit("%s: error: %s" % (PROG, failure), sys.stderr)
+    if args.dry_run:
+        emit("dry-run: nothing written")
+    return code
+
+
+def owned_by(entry: Dict[str, Any], path: Path) -> bool:
+    """Whether this entry created `path` (a symlink counts as the file it resolves to)."""
+    created = entry.get("created_files", [])
+    return str(path) in created or str(resolve_target(path)) in created
+
+
+def hand_over_target(data: Dict[str, Any], entry: Dict[str, Any], target: Path) -> None:
+    """Give ownership of a shared target to the manifest entries that still reference it."""
+    if not owned_by(entry, target):
+        return
+    for other in data.get("installs", []):
+        if other is entry or other.get("target") != str(target):
+            continue
+        files = set(other.get("created_files", []))
+        files.add(str(resolve_target(target)))
+        other["created_files"] = sorted(files)
+
+
+def remove_entry(run: Run, data: Dict[str, Any], entry: Dict[str, Any], keep_block: bool = False) -> None:
+    """Remove what one manifest entry created, then drop it from the manifest."""
+    target = Path(entry["target"])
+    text = read_exact(target) or ""
+    if entry.get("mode") in WHOLE_FILE_MODES:
+        if keep_block:
+            hand_over_target(data, entry, target)
+            run.actions.append("kept the shared file %s" % target)
+        else:
+            run.remove(resolve_target(target))
+    elif keep_block:
+        hand_over_target(data, entry, target)
+        run.actions.append("kept the shared block in %s" % target)
+    else:
+        new_text, removed = strip_block(text, current_pad(text) or 0)
+        if removed:
+            if not new_text.strip() and owned_by(entry, target):
+                run.remove(resolve_target(target))
+            else:
+                run.write(target, new_text)
+    default = entry.get("register_file")
+    if default and default != str(target):
+        register_path = Path(default)
+        register_text = read_exact(register_path) or ""
+        new_text, removed = strip_block(register_text, current_pad(register_text) or 0)
+        if removed:
+            if not new_text.strip() and default in entry.get("created_files", []):
+                run.remove(register_path)
+            else:
+                run.write(register_path, new_text)
+    if entry.get("local"):
+        exclude = git_path(Path(entry.get("root") or "."), "info/exclude")
+        if exclude is not None and exclude.exists():
+            exclude_text = read_exact(exclude) or ""
+            new_text, removed = strip_block(exclude_text, current_pad(exclude_text) or 0)
+            if removed:
+                run.write(exclude, new_text)
+    for directory in sorted(entry.get("created_dirs", []), reverse=True):
+        path = Path(directory)
+        if path.is_dir() and not any(path.iterdir()):
+            run.actions.append("rmdir %s" % path)
+            if not run.dry_run:
+                path.rmdir()
+    manifest_drop(data, manifest_key(entry))
+
+
+def reference_path(entry: Dict[str, Any], platform: str, env: Dict[str, str]) -> Optional[Path]:
+    reference = entry.get("reference_dir")
+    if not reference:
+        return None
+    if reference.startswith("~"):
+        return Path(expand_path(reference, platform, env))
+    return Path(entry["root"]) / reference
+
+
+def cmd_uninstall(args: argparse.Namespace) -> int:
+    env = environment()
+    platform = current_platform()
+    run = Run(env, args.dry_run)
+    data = read_manifest(env)
+    selected = []
+    for entry in data.get("installs", []):
+        if args.agent and args.agent not in ("all", entry["agent"]):
+            continue
+        if args.path and Path(args.path).expanduser().resolve() != Path(entry["root"]):
+            continue
+        if args.file and Path(args.file).expanduser().resolve() != Path(entry["target"]):
+            continue
+        selected.append(entry)
+    if not selected:
+        if args.json:
+            emit(json.dumps({"removed": [], "exit": 0}, indent=2))
+        else:
+            emit("nothing to uninstall")
+        return 0
+    references = []  # type: List[Path]
+    for entry in selected:
+        found = reference_path(entry, platform, env)
+        if found is not None and found not in references:
+            references.append(found)
+        shared = any(other is not entry and other.get("target") == entry.get("target")
+                     and manifest_key(other) not in [manifest_key(e) for e in selected]
+                     for other in data.get("installs", []))
+        remove_entry(run, data, entry, keep_block=shared)
+    remaining = data.get("installs", [])
+    for base in references:
+        still_used = any(reference_path(e, platform, env) == base for e in remaining)
+        if base.is_dir() and not still_used:
+            run.actions.append("removed %s" % base)
+            if not args.dry_run:
+                shutil.rmtree(str(base), ignore_errors=True)
+    if not args.dry_run:
+        write_manifest(env, data)
+    if args.json:
+        emit(json.dumps({"dry_run": args.dry_run, "actions": run.actions, "exit": 0}, indent=2))
+    else:
+        for action in run.actions:
+            emit(action)
+        if args.dry_run:
+            emit("dry-run: nothing written")
+    return 0
+
+
+def status_of(entry: Dict[str, Any], model: Model) -> str:
+    target = Path(entry["target"])
+    if not entry.get("target") or not target.exists():
+        return "missing"
+    text = read_exact(target)
+    if text is None:
+        return "missing"
+    if entry.get("mode") == "file":
+        attributes = managed_attributes(text)
+        if attributes is None or attributes.get("sha256") != entry.get("sha256"):
+            return "modified"
+    else:
+        body = block_body(text)
+        if body is None:
+            return "missing"
+        digest = short_hash(body)
+        if digest != entry.get("sha256"):
+            return "modified"
+    rendered = render(model, entry["tier"], entry["profile"], entry.get("reference_dir"))
+    if entry.get("version") != model.version or short_hash(rendered) != entry.get("sha256"):
+        return "outdated"
+    return "ok"
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    env = environment()
+    data = read_manifest(env)
+    model = build_model(load_texts(package_root()))
+    rows = []
+    for entry in data.get("installs", []):
+        rows.append({"agent": entry["agent"], "scope": entry["scope"], "target": entry["target"],
+                     "tier": entry.get("tier"), "version": entry.get("version"), "state": status_of(entry, model)})
+    if args.json:
+        emit(json.dumps({"installs": rows}, indent=2))
+        return 0
+    if not rows:
+        emit("no installs recorded")
+        return 0
+    for row in rows:
+        emit("%-8s %-10s %-9s %s" % (row["state"], row["agent"], row["scope"], row["target"]))
+    return 0
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    env = environment()
+    pkg = package_root()
+    texts = load_texts(pkg)
+    model = build_model(texts)
+    registry = build_registry(texts)
+    platform = current_platform()
+    run = Run(env, args.dry_run)
+    data = read_manifest(env)
+    for entry in list(data.get("installs", [])):
+        if args.agent and args.agent not in ("all", entry["agent"]):
+            continue
+        if entry["agent"] == "custom":
+            continue
+        agent = find_agent(registry, entry["agent"])
+        root = Path(entry["root"])
+        target_path, target = target_for(agent, entry["scope"], root, platform, env)
+        target_path = Path(entry["target"]) if entry["scope"] == "custom" else target_path
+        comment = target.get("comment") or "html"
+        reference = entry.get("reference_dir")
+        if reference:
+            base = Path(expand_path(reference, platform, env)) if reference.startswith("~") else root / reference
+            install_reference(run, pkg, model, texts, base, args.with_examples if hasattr(args, "with_examples") else False)
+        try:
+            tier, digest, mode, created, _ = install_target(
+                run, model, texts, agent, entry["scope"], root, platform, entry["tier"], entry["profile"],
+                comment, reference, reference is None, False, False, None, target_path, target, entry.get("local", False))
+            key = manifest_key(entry)
+            manifest_drop(data, key)
+            data["installs"].append(entry_of(agent["id"], entry["scope"], entry["root"], entry["target"], mode,
+                                             tier, entry["profile"], reference,
+                                             entry.get("created_files", []) + created,
+                                             entry.get("created_dirs", []) + run.created_dirs,
+                                             entry.get("local", False), model.version, digest))
+        except DoctrineError as error:
+            run.failures.append("%s: %s" % (agent["id"], error))
+    if not args.dry_run:
+        write_manifest(env, data)
+    if args.json:
+        emit(json.dumps({"dry_run": args.dry_run, "actions": run.actions, "failures": run.failures}, indent=2))
+        return 0
+    for action in run.actions:
+        emit(action)
+    for failure in run.failures:
+        emit("%s: error: %s" % (PROG, failure), sys.stderr)
+    return 0
+
+
+COMMANDS = {"version": cmd_version, "lint": cmd_lint, "build": cmd_build, "print": cmd_print,
+            "agents": cmd_agents, "detect": cmd_detect, "install": cmd_install, "uninstall": cmd_uninstall,
+            "update": cmd_update, "status": cmd_status}
+
+
+class Parser(argparse.ArgumentParser):
+    """Usage errors exit with 1; 2 is reserved for partial failure."""
+
+    def error(self, message: str) -> None:  # type: ignore[override]
+        self.print_usage(sys.stderr)
+        self.exit(1, "%s: error: %s\n" % (self.prog, message))
+
+
+def scope_argument(value: str) -> str:
+    if value not in SCOPES:
+        raise argparse.ArgumentTypeError("unknown scope %r (choose from %s)" % (value, ", ".join(SCOPES)))
+    return SCOPES[value]
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = Parser(prog=PROG, description="Compile, check and install the Doctrine engineering standards.")
+    commands = parser.add_subparsers(dest="command", metavar="COMMAND")
+
+    def add(name: str, summary: str) -> argparse.ArgumentParser:
+        return commands.add_parser(name, help=summary, description=summary)
+
+    def tiering(sub: argparse.ArgumentParser) -> None:
+        sub.add_argument("--tier", choices=TIERS, default="compact")
+        sub.add_argument("--profile", choices=PROFILES, default="fullstack")
+
+    def targeting(sub: argparse.ArgumentParser, required: bool) -> None:
+        sub.add_argument("--agent", required=required, metavar="IDS",
+                         help="comma-separated registry ids, or all, detected, custom")
+        if required:
+            sub.add_argument("--scope", type=scope_argument, default="project",
+                             metavar="{project,workspace,global}", help="aliases: namespace=workspace, user=global")
+            sub.add_argument("--path", metavar="DIR")
+            sub.add_argument("--each-repo", action="store_true")
+            sub.add_argument("--file", metavar="PATH")
+        sub.add_argument("--dry-run", action="store_true")
+        sub.add_argument("--json", action="store_true")
+
+    add("version", "Print the package version.")
+    sub = add("agents", "List the supported agents.")
+    group = sub.add_mutually_exclusive_group()
+    group.add_argument("--json", action="store_true")
+    group.add_argument("--markdown", action="store_true")
+    sub = add("detect", "Report which agents are present on this machine or in a project.")
+    sub.add_argument("--path", metavar="DIR")
+    sub.add_argument("--json", action="store_true")
+    sub = add("print", "Print one tier of Doctrine to standard output.")
+    tiering(sub)
+    sub.add_argument("--reference-dir", metavar="PATH", default=DEFAULT_REFERENCE_DIR)
+    sub.add_argument("--agent", metavar="ID", help="apply this agent's front matter and size limit")
+    sub = add("lint", "Check the package: grammar, ids, excerpts, budgets, registry, text hygiene.")
+    sub.add_argument("--json", action="store_true")
+    sub = add("build", "Regenerate dist/ and agents/README.md from the sources.")
+    sub.add_argument("--check", action="store_true", help="write nothing; exit 1 when a generated file is stale")
+    sub = add("install", "Install Doctrine for one or more agents.")
+    targeting(sub, True)
+    tiering(sub)
+    sub.add_argument("--depth", type=int, default=2, metavar="N")
+    sub.add_argument("--no-reference", action="store_true")
+    sub.add_argument("--with-examples", action="store_true")
+    sub.add_argument("--local", action="store_true")
+    sub.add_argument("--comment", choices=COMMENTS)
+    sub.add_argument("--base", metavar="MODEL", help="base model for a modelfile target")
+    sub.add_argument("--force", action="store_true")
+    targeting(add("uninstall", "Remove what install wrote."), True)
+    targeting(add("update", "Re-apply recorded installs."), False)
+    add("status", "Report the state of every recorded install.").add_argument("--json", action="store_true")
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not args.command:
+        parser.print_help(sys.stderr)
+        return 1
+    try:
+        return COMMANDS[args.command](args)
+    except DoctrineError as error:
+        emit("%s: error: %s" % (PROG, error), sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
