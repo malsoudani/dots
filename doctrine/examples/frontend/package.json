@@ -1,0 +1,20 @@
+{
+  "name": "team-invitations-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "fp-ts": "2.16.11",
+    "react": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "25.9.9",
+    "@types/react": "19.3.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}

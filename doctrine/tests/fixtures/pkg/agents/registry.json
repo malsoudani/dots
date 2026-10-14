@@ -1,0 +1,152 @@
+{
+  "schema": 1,
+  "verified_on": "2026-01-15",
+  "agents": [
+    {
+      "id": "alpha",
+      "name": "Alpha Agent",
+      "vendor": "Acme",
+      "kind": "agent",
+      "rank": 1,
+      "detect": { "commands": ["alpha"], "paths": ["~/.alpha"], "project_paths": [".alpha", "ALPHA.md"] },
+      "project": {
+        "path": ".alpha/rules/doctrine.md",
+        "mode": "file",
+        "frontmatter": { "description": "Doctrine: engineering standards", "alwaysApply": true, "globs": ["**/*"], "priority": 1 },
+        "comment": "html"
+      },
+      "global": {
+        "path": "~/.alpha/rules/doctrine.md",
+        "mode": "file",
+        "frontmatter": null,
+        "comment": "html",
+        "platform_paths": { "windows": "{appdata}/Alpha/rules/doctrine.md" }
+      },
+      "workspace": { "supported": true, "path": "ALPHA.md", "mode": "block", "comment": "html" },
+      "register": null,
+      "max_chars": null,
+      "reads_agents_md": false,
+      "also_reads": ["ALPHA.local.md"],
+      "verify": "Run `alpha rules` and look for doctrine.md in the list.",
+      "oneshot": "alpha run --prompt \"review this change\"",
+      "local_models": "Point `ALPHA_BASE_URL` at a local model server.",
+      "notes": ["Rules files load at session start; restart after installing."],
+      "sources": [
+        { "url": "https://example.com/docs/alpha/rules", "quote": "Alpha loads every Markdown file in .alpha/rules at startup.", "accessed": "2026-01-15" }
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "bravo",
+      "name": "Bravo CLI",
+      "vendor": "Acme",
+      "kind": "agent",
+      "rank": 2,
+      "detect": { "commands": ["bravo"], "paths": ["{xdg_config}/bravo"], "project_paths": ["AGENTS.md"] },
+      "project": { "path": "AGENTS.md", "mode": "block", "frontmatter": null, "comment": "html" },
+      "global": { "path": "{xdg_config}/bravo/AGENTS.md", "mode": "block", "frontmatter": null, "comment": "html" },
+      "workspace": { "supported": true, "path": "AGENTS.md", "mode": "block", "comment": "html" },
+      "register": null,
+      "max_chars": null,
+      "reads_agents_md": true,
+      "also_reads": [],
+      "verify": "Ask the agent which instructions it loaded.",
+      "oneshot": null,
+      "local_models": null,
+      "notes": [],
+      "sources": [
+        { "url": "https://example.com/docs/bravo/agents-md", "quote": "Bravo reads AGENTS.md from the working directory and every parent.", "accessed": "2026-01-15" }
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "charlie",
+      "name": "Charlie",
+      "vendor": "Example Labs",
+      "kind": "agent",
+      "rank": 3,
+      "detect": { "commands": ["charlie"], "paths": [], "project_paths": ["AGENTS.md"] },
+      "project": { "path": "AGENTS.md", "mode": "block", "frontmatter": null, "comment": "html" },
+      "global": null,
+      "global_unsupported_reason": "Charlie has no user-level instruction file.",
+      "workspace": { "supported": false, "reason": "Charlie reads only the repository root." },
+      "register": null,
+      "max_chars": 1500,
+      "reads_agents_md": true,
+      "also_reads": [],
+      "verify": "Open the context panel.",
+      "oneshot": null,
+      "local_models": null,
+      "notes": ["Instruction files over the limit are truncated without a warning."],
+      "sources": [],
+      "confidence": "medium"
+    },
+    {
+      "id": "delta",
+      "name": "Delta Pair",
+      "vendor": "Example Labs",
+      "kind": "agent",
+      "rank": 4,
+      "detect": { "commands": ["delta"], "paths": [], "project_paths": [".delta.conf.yml"] },
+      "project": { "path": "docs/doctrine.md", "mode": "file", "frontmatter": null, "comment": "html" },
+      "global": { "path": "{vscode_user}/prompts/doctrine.md", "mode": "file", "frontmatter": null, "comment": "html" },
+      "workspace": { "supported": false, "reason": "Delta reads only files named in its configuration." },
+      "register": { "file": ".delta.conf.yml", "comment": "hash", "yaml_list_key": "read" },
+      "max_chars": null,
+      "reads_agents_md": false,
+      "also_reads": [],
+      "verify": "Run `delta --show-context`.",
+      "oneshot": "delta --message \"review this change\"",
+      "local_models": null,
+      "notes": [],
+      "sources": [
+        { "url": "https://example.com/docs/delta/config", "quote": "Files listed under read: are added to every session.", "accessed": "2026-01-15" }
+      ],
+      "confidence": "high"
+    },
+    {
+      "id": "echo",
+      "name": "Echo",
+      "vendor": "Example Labs",
+      "kind": "agent",
+      "rank": 5,
+      "detect": { "commands": [], "paths": ["{appdata}/Echo"], "project_paths": [] },
+      "project": { "path": ".echo/instructions.txt", "mode": "block", "frontmatter": null, "comment": "hash" },
+      "global": { "path": "{appdata}/Echo/instructions.txt", "mode": "block", "frontmatter": null, "comment": "hash" },
+      "workspace": { "supported": false, "reason": "Echo has no workspace concept." },
+      "register": null,
+      "max_chars": 120,
+      "reads_agents_md": false,
+      "also_reads": [],
+      "verify": "Echo prints the instruction size at startup.",
+      "oneshot": null,
+      "local_models": null,
+      "notes": [],
+      "sources": [],
+      "confidence": "medium"
+    },
+    {
+      "id": "foxtrot",
+      "name": "Foxtrot Runtime",
+      "vendor": "Acme",
+      "kind": "runtime",
+      "rank": 6,
+      "detect": { "commands": ["foxtrot"], "paths": ["~/.foxtrot"], "project_paths": [] },
+      "project": { "path": "Modelfile.doctrine", "mode": "modelfile", "frontmatter": null, "comment": "hash" },
+      "global": { "path": "~/.foxtrot/doctrine.prompt.md", "mode": "text", "frontmatter": null, "comment": "html" },
+      "workspace": { "supported": false, "reason": "A runtime has no workspace discovery." },
+      "register": null,
+      "max_chars": null,
+      "reads_agents_md": false,
+      "also_reads": [],
+      "verify": "Run `foxtrot show doctrine`.",
+      "oneshot": "foxtrot run doctrine \"review this change\"",
+      "local_models": "Foxtrot is the local model runtime.",
+      "notes": [],
+      "sources": [
+        { "url": "https://example.com/docs/foxtrot/modelfile", "quote": "The SYSTEM instruction sets the system prompt.", "accessed": "2026-01-15" }
+      ],
+      "confidence": "high"
+    }
+  ]
+}

@@ -1,0 +1,1855 @@
+{
+  "version": "0.1.0",
+  "rules": [
+    {
+      "id": "P1",
+      "title": "Decisions live in one layer",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "micro",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 17
+    },
+    {
+      "id": "P2",
+      "title": "Parse at the boundary, trust inside",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "micro",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 24
+    },
+    {
+      "id": "P3",
+      "title": "Expected failures are values, mapped once",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "micro",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 31
+    },
+    {
+      "id": "P4",
+      "title": "State is explicit, closed, and exhaustive",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "micro",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 38
+    },
+    {
+      "id": "P5",
+      "title": "A unit of work is all-or-nothing",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "micro",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 45
+    },
+    {
+      "id": "P6",
+      "title": "Pay for ceremony only where you collect",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "micro",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 52
+    },
+    {
+      "id": "P7",
+      "title": "Machines enforce, prose explains",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "micro",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 59
+    },
+    {
+      "id": "P8",
+      "title": "Build what is used, delete what is not",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "micro",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 66
+    },
+    {
+      "id": "P9",
+      "title": "One way to do each thing",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "micro",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 73
+    },
+    {
+      "id": "P10",
+      "title": "Wire dependencies at the edge",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "compact",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 80
+    },
+    {
+      "id": "P11",
+      "title": "Tests prove behavior at boundaries, including failure",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "micro",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 87
+    },
+    {
+      "id": "P12",
+      "title": "Ship in small reversible steps and verify at the edge",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "micro",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 94
+    },
+    {
+      "id": "P13",
+      "title": "Secure by construction",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "micro",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 101
+    },
+    {
+      "id": "P14",
+      "title": "The host project wins",
+      "area": "principles",
+      "group": "",
+      "severity": null,
+      "tier": "micro",
+      "principles": [],
+      "check": null,
+      "file": "core/principles.md",
+      "line": 108
+    },
+    {
+      "id": "BE-STRUCT-1",
+      "title": "Organize the backend as vertical slices, one directory per capability",
+      "area": "backend",
+      "group": "Structure",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P1",
+        "P8"
+      ],
+      "check": "Does every new capability live in its own slice directory with domains, service, transport and tests?",
+      "file": "core/backend.md",
+      "line": 9
+    },
+    {
+      "id": "BE-STRUCT-2",
+      "title": "Dependencies point inward: transport to service to persistence",
+      "area": "backend",
+      "group": "Structure",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P1",
+        "P10"
+      ],
+      "check": "Do domain modules import zero model or ORM symbols at runtime, and does no module import from a transport module?",
+      "file": "core/backend.md",
+      "line": 17
+    },
+    {
+      "id": "BE-STRUCT-3",
+      "title": "Name shared code and product code honestly",
+      "area": "backend",
+      "group": "Structure",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P8"
+      ],
+      "check": "Is every module under a shared/common package free of product-specific nouns and rules?",
+      "file": "core/backend.md",
+      "line": 26
+    },
+    {
+      "id": "BE-STRUCT-4",
+      "title": "No speculative modules: every slice has a caller and a test",
+      "area": "backend",
+      "group": "Structure",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P6",
+        "P8"
+      ],
+      "check": "Does every new module have at least one caller outside itself and at least one test?",
+      "file": "core/backend.md",
+      "line": 34
+    },
+    {
+      "id": "BE-STRUCT-5",
+      "title": "Every slice documents its service API in a short README",
+      "area": "backend",
+      "group": "Structure",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P7"
+      ],
+      "check": "If a service method or endpoint changed, did the slice README change in the same diff?",
+      "file": "core/backend.md",
+      "line": 42
+    },
+    {
+      "id": "BE-DOM-1",
+      "title": "Parse every request into a request domain at the transport boundary",
+      "area": "backend",
+      "group": "Domains",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P2"
+      ],
+      "check": "Does every handler obtain all of its inputs from a single parsed request domain?",
+      "file": "core/backend.md",
+      "line": 52
+    },
+    {
+      "id": "BE-DOM-2",
+      "title": "Request domains are strict about types and lenient about extras",
+      "area": "backend",
+      "group": "Domains",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P2",
+        "P13"
+      ],
+      "check": "Does each request field have the narrowest type that fits, and are unknown fields ignored rather than rejected?",
+      "file": "core/backend.md",
+      "line": 61
+    },
+    {
+      "id": "BE-DOM-3",
+      "title": "Validate strictly on input, serialize leniently on output",
+      "area": "backend",
+      "group": "Domains",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P2"
+      ],
+      "check": "Can every row already in the database be serialized by the response domain without raising?",
+      "file": "core/backend.md",
+      "line": 69
+    },
+    {
+      "id": "BE-DOM-4",
+      "title": "Define each vocabulary once as an enum and branch on its members",
+      "area": "backend",
+      "group": "Domains",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P9"
+      ],
+      "check": "Is every fixed vocabulary declared once and compared by member everywhere?",
+      "file": "core/backend.md",
+      "line": 78
+    },
+    {
+      "id": "BE-DOM-5",
+      "title": "Domain objects are plain values: no queries, no I/O",
+      "area": "backend",
+      "group": "Domains",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P1",
+        "P10"
+      ],
+      "check": "Can every domain class be constructed in a unit test with no database and no network?",
+      "file": "core/backend.md",
+      "line": 87
+    },
+    {
+      "id": "BE-SVC-1",
+      "title": "Business rules live in services; transport never touches persistence",
+      "area": "backend",
+      "group": "Services",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P1"
+      ],
+      "check": "Is the handler free of ORM calls and of branching on business conditions?",
+      "file": "core/backend.md",
+      "line": 97
+    },
+    {
+      "id": "BE-SVC-2",
+      "title": "Inject collaborators through the constructor; wire defaults in a factory",
+      "area": "backend",
+      "group": "Services",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P10"
+      ],
+      "check": "Does the service obtain every collaborator from its constructor rather than importing and instantiating it inline?",
+      "file": "core/backend.md",
+      "line": 105
+    },
+    {
+      "id": "BE-SVC-3",
+      "title": "Cross-slice access goes through the other slice's service",
+      "area": "backend",
+      "group": "Services",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P1",
+        "P9"
+      ],
+      "check": "Does each service touch only its own slice's models?",
+      "file": "core/backend.md",
+      "line": 113
+    },
+    {
+      "id": "BE-SVC-4",
+      "title": "Services take and return domain values, never ORM objects",
+      "area": "backend",
+      "group": "Services",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P2"
+      ],
+      "check": "Do service signatures mention only primitives and domain types?",
+      "file": "core/backend.md",
+      "line": 122
+    },
+    {
+      "id": "BE-SVC-5",
+      "title": "Raise typed business errors from one exception hierarchy",
+      "area": "backend",
+      "group": "Services",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P3"
+      ],
+      "check": "Does every expected failure raised by a service derive from the shared business-error base?",
+      "file": "core/backend.md",
+      "line": 130
+    },
+    {
+      "id": "BE-SVC-6",
+      "title": "Make retried writes idempotent",
+      "area": "backend",
+      "group": "Services",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P5"
+      ],
+      "check": "Is there a test that performs the write twice and asserts no duplicate?",
+      "file": "core/backend.md",
+      "line": 138
+    },
+    {
+      "id": "BE-SVC-7",
+      "title": "Compute derived state in one pure helper shared by reads and writes",
+      "area": "backend",
+      "group": "Services",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P9"
+      ],
+      "check": "Is each derivation implemented exactly once?",
+      "file": "core/backend.md",
+      "line": 146
+    },
+    {
+      "id": "BE-TXN-1",
+      "title": "One service method is one transaction",
+      "area": "backend",
+      "group": "Transactions",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P5"
+      ],
+      "check": "Does every multi-write service method run in one transaction, with a test that forces a late failure and asserts nothing persisted?",
+      "file": "core/backend.md",
+      "line": 156
+    },
+    {
+      "id": "BE-TXN-2",
+      "title": "Never hold a transaction open across an outbound network call",
+      "area": "backend",
+      "group": "Transactions",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P5"
+      ],
+      "check": "Is every remote call outside all transaction blocks?",
+      "file": "core/backend.md",
+      "line": 165
+    },
+    {
+      "id": "BE-TXN-3",
+      "title": "Recover from an integrity error only inside a savepoint",
+      "area": "backend",
+      "group": "Transactions",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P5"
+      ],
+      "check": "Is every caught integrity error raised from inside a nested atomic block?",
+      "file": "core/backend.md",
+      "line": 173
+    },
+    {
+      "id": "BE-TXN-4",
+      "title": "Run irreversible side effects after commit",
+      "area": "backend",
+      "group": "Transactions",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P5"
+      ],
+      "check": "Are all non-database side effects registered to run on commit?",
+      "file": "core/backend.md",
+      "line": 181
+    },
+    {
+      "id": "BE-API-1",
+      "title": "A handler authenticates, parses, calls one service method, and responds",
+      "area": "backend",
+      "group": "Transport",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P1"
+      ],
+      "check": "Does the handler consist only of parse, one service call and the response?",
+      "file": "core/backend.md",
+      "line": 191
+    },
+    {
+      "id": "BE-API-2",
+      "title": "One error contract for the whole API, produced in one place",
+      "area": "backend",
+      "group": "Transport",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P3",
+        "P9"
+      ],
+      "check": "Does every error path, including validation and malformed input, produce the single error shape with a 4xx status?",
+      "file": "core/backend.md",
+      "line": 199
+    },
+    {
+      "id": "BE-API-3",
+      "title": "Write error messages for the end user; clients show them verbatim",
+      "area": "backend",
+      "group": "Transport",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P3"
+      ],
+      "check": "Would every error message make sense to a person who has never seen the code?",
+      "file": "core/backend.md",
+      "line": 207
+    },
+    {
+      "id": "BE-API-4",
+      "title": "Never echo upstream or configuration detail to callers; log it instead",
+      "area": "backend",
+      "group": "Transport",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P13"
+      ],
+      "check": "Can any response body contain text produced by a third party or by a configuration check?",
+      "file": "core/backend.md",
+      "line": 215
+    },
+    {
+      "id": "BE-API-5",
+      "title": "Deny by default: endpoints are authenticated unless they opt out",
+      "area": "backend",
+      "group": "Transport",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P13"
+      ],
+      "check": "Is every public endpoint public through the explicit opt-out base and nothing else?",
+      "file": "core/backend.md",
+      "line": 223
+    },
+    {
+      "id": "BE-API-6",
+      "title": "Scope every lookup to the caller; foreign and unknown IDs look the same",
+      "area": "backend",
+      "group": "Transport",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P13"
+      ],
+      "check": "For every client-supplied ID, is there a test using another tenant's ID that gets 404?",
+      "file": "core/backend.md",
+      "line": 231
+    },
+    {
+      "id": "BE-API-7",
+      "title": "Cap everything the client controls",
+      "area": "backend",
+      "group": "Transport",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P13"
+      ],
+      "check": "Does every client-controlled size or option have a tested limit?",
+      "file": "core/backend.md",
+      "line": 239
+    },
+    {
+      "id": "BE-API-8",
+      "title": "Timestamps cross the boundary as ISO-8601 with an offset",
+      "area": "backend",
+      "group": "Transport",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P2"
+      ],
+      "check": "Is every timestamp field on a request domain timezone-aware?",
+      "file": "core/backend.md",
+      "line": 247
+    },
+    {
+      "id": "BE-API-9",
+      "title": "Reserve 401 for dead credentials",
+      "area": "backend",
+      "group": "Transport",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P3"
+      ],
+      "check": "Can any non-credential failure produce a 401?",
+      "file": "core/backend.md",
+      "line": 255
+    },
+    {
+      "id": "BE-API-10",
+      "title": "Liveness is shallow and dependency-free; readiness checks dependencies",
+      "area": "backend",
+      "group": "Transport",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P12"
+      ],
+      "check": "Does the liveness handler run zero queries, and does something else monitor the dependencies?",
+      "file": "core/backend.md",
+      "line": 263
+    },
+    {
+      "id": "BE-EXT-1",
+      "title": "Third-party credentials stay server-side behind an allowlisting proxy",
+      "area": "backend",
+      "group": "Third parties",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P13"
+      ],
+      "check": "Is the upstream request built field by field from an allowlist, with redirects disabled and a timeout?",
+      "file": "core/backend.md",
+      "line": 273
+    },
+    {
+      "id": "BE-EXT-2",
+      "title": "Wrap each provider SDK in one adapter with its own error types",
+      "area": "backend",
+      "group": "Third parties",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P3",
+        "P10"
+      ],
+      "check": "Is the provider SDK imported in exactly one module?",
+      "file": "core/backend.md",
+      "line": 281
+    },
+    {
+      "id": "BE-EXT-3",
+      "title": "Application code reads configuration from the environment only",
+      "area": "backend",
+      "group": "Third parties",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P10"
+      ],
+      "check": "Does application code import any cloud SDK to read configuration?",
+      "file": "core/backend.md",
+      "line": 289
+    },
+    {
+      "id": "BE-DB-1",
+      "title": "Generate migrations from models; never hand-write or edit them",
+      "area": "backend",
+      "group": "Persistence",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P7"
+      ],
+      "check": "Does CI fail when models and migrations disagree, and is every migration file tool-generated?",
+      "file": "core/backend.md",
+      "line": 299
+    },
+    {
+      "id": "BE-DB-2",
+      "title": "Use opaque, non-sequential identifiers and audit timestamps",
+      "area": "backend",
+      "group": "Persistence",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P13"
+      ],
+      "check": "Do new tables inherit the shared base model?",
+      "file": "core/backend.md",
+      "line": 307
+    },
+    {
+      "id": "BE-DB-3",
+      "title": "Enforce uniqueness in the database and handle the conflict in code",
+      "area": "backend",
+      "group": "Persistence",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P5",
+        "P7"
+      ],
+      "check": "Is every uniqueness rule backed by a constraint and a tested conflict path?",
+      "file": "core/backend.md",
+      "line": 315
+    },
+    {
+      "id": "BE-CFG-1",
+      "title": "Select the settings profile with one switch",
+      "area": "backend",
+      "group": "Configuration",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P9"
+      ],
+      "check": "Is there exactly one mechanism that selects the profile?",
+      "file": "core/backend.md",
+      "line": 325
+    },
+    {
+      "id": "BE-CFG-2",
+      "title": "Production configuration validates itself and refuses to boot when unsafe",
+      "area": "backend",
+      "group": "Configuration",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P7",
+        "P13"
+      ],
+      "check": "Does booting production with an unsafe value fail, and does CI run the production configuration check?",
+      "file": "core/backend.md",
+      "line": 333
+    },
+    {
+      "id": "BE-CFG-3",
+      "title": "No secret in any repository or client; one store, one manifest, one test",
+      "area": "backend",
+      "group": "Configuration",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P13",
+        "P7"
+      ],
+      "check": "Does a test fail if a setting is read that the manifest does not declare?",
+      "file": "core/backend.md",
+      "line": 341
+    },
+    {
+      "id": "BE-CFG-4",
+      "title": "Trust a proxy header only after verifying it arrives at the origin",
+      "area": "backend",
+      "group": "Configuration",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P13",
+        "P11"
+      ],
+      "check": "Is each trusted header backed by evidence captured at the origin?",
+      "file": "core/backend.md",
+      "line": 349
+    },
+    {
+      "id": "FE-STRUCT-1",
+      "title": "Organize the client by experience; each owns its flow end to end",
+      "area": "frontend",
+      "group": "Structure",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P1",
+        "P8"
+      ],
+      "check": "Does each feature's code live under one experience directory with the six sub-folders it needs?",
+      "file": "core/frontend.md",
+      "line": 11
+    },
+    {
+      "id": "FE-STRUCT-2",
+      "title": "Dependencies point inward: presentation, manager, services, models",
+      "area": "frontend",
+      "group": "Structure",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P1",
+        "P10"
+      ],
+      "check": "Does any model import a service or storage module, or any component import a service?",
+      "file": "core/frontend.md",
+      "line": 19
+    },
+    {
+      "id": "FE-STRUCT-3",
+      "title": "Share code only after a second real use",
+      "area": "frontend",
+      "group": "Structure",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P8"
+      ],
+      "check": "Does everything in the shared area have at least two callers or is it single-by-nature infrastructure?",
+      "file": "core/frontend.md",
+      "line": 28
+    },
+    {
+      "id": "FE-STRUCT-4",
+      "title": "Routes are composition roots: build services once, inject, decide nothing",
+      "area": "frontend",
+      "group": "Structure",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P10"
+      ],
+      "check": "Does the route construct each service exactly once per mount and contain no conditional workflow?",
+      "file": "core/frontend.md",
+      "line": 36
+    },
+    {
+      "id": "FE-STATE-1",
+      "title": "Intents are explicit events in a closed, tagged union",
+      "area": "frontend",
+      "group": "Events and state",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P4"
+      ],
+      "check": "Is every event a member of one tagged union with a literal `kind`?",
+      "file": "core/frontend.md",
+      "line": 46
+    },
+    {
+      "id": "FE-STATE-2",
+      "title": "Renderable states are explicit, tagged, and shaped for the UI",
+      "area": "frontend",
+      "group": "Events and state",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P4"
+      ],
+      "check": "Does presentation select what to render by `state.kind` with no `instanceof` chains or optional-field probing?",
+      "file": "core/frontend.md",
+      "line": 55
+    },
+    {
+      "id": "FE-STATE-3",
+      "title": "Dispatch exhaustively; an unknown event is an error",
+      "area": "frontend",
+      "group": "Events and state",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P4",
+        "P7"
+      ],
+      "check": "Does adding a new event type without a case fail the type check?",
+      "file": "core/frontend.md",
+      "line": 63
+    },
+    {
+      "id": "FE-STATE-4",
+      "title": "Give orthogonal concerns separate state machines",
+      "area": "frontend",
+      "group": "Events and state",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P4"
+      ],
+      "check": "Does any single state union mix two concerns that can change independently?",
+      "file": "core/frontend.md",
+      "line": 71
+    },
+    {
+      "id": "FE-STATE-5",
+      "title": "Background work is sub-state of the loaded state, never a replacement",
+      "area": "frontend",
+      "group": "Events and state",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P4"
+      ],
+      "check": "Does the manager hold any variable that duplicates data from a previous state?",
+      "file": "core/frontend.md",
+      "line": 80
+    },
+    {
+      "id": "FE-STATE-6",
+      "title": "A submission owns the flow until it settles",
+      "area": "frontend",
+      "group": "Events and state",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P5"
+      ],
+      "check": "Is there a test showing that a result arriving during a submission leaves the state `Submitting`?",
+      "file": "core/frontend.md",
+      "line": 89
+    },
+    {
+      "id": "FE-STATE-7",
+      "title": "Never show data loaded for a different key",
+      "area": "frontend",
+      "group": "Events and state",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P4"
+      ],
+      "check": "Is there a test that switches keys and asserts the loading state is empty?",
+      "file": "core/frontend.md",
+      "line": 97
+    },
+    {
+      "id": "FE-STATE-8",
+      "title": "State carries data and intent; presentation owns the words",
+      "area": "frontend",
+      "group": "Events and state",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P1"
+      ],
+      "check": "Does any manager state contain a user-facing sentence, or any component branch on one?",
+      "file": "core/frontend.md",
+      "line": 105
+    },
+    {
+      "id": "FE-STATE-9",
+      "title": "Derive view models with pure functions",
+      "area": "frontend",
+      "group": "Events and state",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P1",
+        "P11"
+      ],
+      "check": "Is each derived display value computed in one tested pure function?",
+      "file": "core/frontend.md",
+      "line": 114
+    },
+    {
+      "id": "FE-MGR-1",
+      "title": "The manager is a plain class; the framework binding is a thin adapter",
+      "area": "frontend",
+      "group": "Manager",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P6",
+        "P10",
+        "P11"
+      ],
+      "check": "Can the manager be constructed and driven in a unit test with no UI framework import?",
+      "file": "core/frontend.md",
+      "line": 124
+    },
+    {
+      "id": "FE-MGR-2",
+      "title": "The manager owns sequencing, branching, validation, and automatic actions",
+      "area": "frontend",
+      "group": "Manager",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P1"
+      ],
+      "check": "Is there any conditional about the workflow outside the manager and its pure helpers?",
+      "file": "core/frontend.md",
+      "line": 132
+    },
+    {
+      "id": "FE-MGR-3",
+      "title": "Compute each transition from the state at the moment the result arrives",
+      "area": "frontend",
+      "group": "Manager",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P4",
+        "P5"
+      ],
+      "check": "Does every post-await transition read the current state inside the update function?",
+      "file": "core/frontend.md",
+      "line": 141
+    },
+    {
+      "id": "FE-MGR-4",
+      "title": "Resolve flags and environment at the composition root and pass them in",
+      "area": "frontend",
+      "group": "Manager",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P10"
+      ],
+      "check": "Does any file outside routes and the flag model read the environment?",
+      "file": "core/frontend.md",
+      "line": 149
+    },
+    {
+      "id": "FE-MGR-5",
+      "title": "Forms report snapshots; validity and submission mapping are pure functions",
+      "area": "frontend",
+      "group": "Manager",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P1"
+      ],
+      "check": "Are validity and request mapping pure functions with tests, not code in a component?",
+      "file": "core/frontend.md",
+      "line": 157
+    },
+    {
+      "id": "FE-SVC-1",
+      "title": "Every service method returns a result value: failure left, success right",
+      "area": "frontend",
+      "group": "Services",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P3"
+      ],
+      "check": "Does every service method's return type include the failure arm, with no expected failure thrown?",
+      "file": "core/frontend.md",
+      "line": 167
+    },
+    {
+      "id": "FE-SVC-2",
+      "title": "Normalize failures at the service boundary into typed codes",
+      "area": "frontend",
+      "group": "Services",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P3"
+      ],
+      "check": "Does the manager branch on failure codes only, never on message text?",
+      "file": "core/frontend.md",
+      "line": 175
+    },
+    {
+      "id": "FE-SVC-3",
+      "title": "Show users only messages your own API wrote",
+      "area": "frontend",
+      "group": "Services",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P3",
+        "P13"
+      ],
+      "check": "Can a browser or parser error string reach the UI?",
+      "file": "core/frontend.md",
+      "line": 183
+    },
+    {
+      "id": "FE-SVC-4",
+      "title": "One HTTP client owns URLs, headers, error parsing, and auth",
+      "area": "frontend",
+      "group": "Services",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P9"
+      ],
+      "check": "Is `fetch` (or the HTTP library) called from exactly one module?",
+      "file": "core/frontend.md",
+      "line": 191
+    },
+    {
+      "id": "FE-SVC-5",
+      "title": "Refresh once on 401; clear tokens only when the session is provably dead",
+      "area": "frontend",
+      "group": "Services",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P5",
+        "P9"
+      ],
+      "check": "Do tests prove a 5xx or network error during refresh leaves both tokens in place?",
+      "file": "core/frontend.md",
+      "line": 199
+    },
+    {
+      "id": "FE-SVC-6",
+      "title": "Storage keys live in one module and storage is injected",
+      "area": "frontend",
+      "group": "Services",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P9",
+        "P10"
+      ],
+      "check": "Does each key string appear in exactly one source file?",
+      "file": "core/frontend.md",
+      "line": 207
+    },
+    {
+      "id": "FE-SVC-7",
+      "title": "Map wire formats to models in one place at the service boundary",
+      "area": "frontend",
+      "group": "Services",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P2"
+      ],
+      "check": "Does any code outside a service or mapper reference a wire field name?",
+      "file": "core/frontend.md",
+      "line": 215
+    },
+    {
+      "id": "FE-SVC-8",
+      "title": "Keep concurrency guards on instances and make effects idempotent",
+      "area": "frontend",
+      "group": "Services",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P4"
+      ],
+      "check": "Is there any mutable module-level variable in a service?",
+      "file": "core/frontend.md",
+      "line": 223
+    },
+    {
+      "id": "FE-SVC-9",
+      "title": "Nothing in the bundle is secret; build-time configuration needs a rebuild",
+      "area": "frontend",
+      "group": "Services",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P13"
+      ],
+      "check": "Does any client environment variable hold a secret?",
+      "file": "core/frontend.md",
+      "line": 231
+    },
+    {
+      "id": "FE-UI-1",
+      "title": "Components render state and emit events; local state is ephemeral only",
+      "area": "frontend",
+      "group": "Presentation",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P1"
+      ],
+      "check": "Does any component hold state that outlives the interaction or affects the workflow?",
+      "file": "core/frontend.md",
+      "line": 241
+    },
+    {
+      "id": "FE-UI-2",
+      "title": "No services, storage, environment, or business branching in presentation",
+      "area": "frontend",
+      "group": "Presentation",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P1"
+      ],
+      "check": "Do presentation files import any service, storage helper or environment accessor?",
+      "file": "core/frontend.md",
+      "line": 249
+    },
+    {
+      "id": "FE-UI-3",
+      "title": "Business constants and rules are pure, tested model functions",
+      "area": "frontend",
+      "group": "Presentation",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P1",
+        "P11"
+      ],
+      "check": "Does any component define a constant or predicate with business meaning?",
+      "file": "core/frontend.md",
+      "line": 258
+    },
+    {
+      "id": "FE-UI-4",
+      "title": "Test hooks in the markup are a contract; refactors keep them",
+      "area": "frontend",
+      "group": "Presentation",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P7"
+      ],
+      "check": "Are all selectors used by end-to-end tests still present after the change?",
+      "file": "core/frontend.md",
+      "line": 266
+    },
+    {
+      "id": "FE-UI-5",
+      "title": "Consume design tokens and shared primitives; never duplicate them",
+      "area": "frontend",
+      "group": "Presentation",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P9"
+      ],
+      "check": "Does the change hard-code a value that exists as a token or re-create an existing primitive?",
+      "file": "core/frontend.md",
+      "line": 274
+    },
+    {
+      "id": "CT-1",
+      "title": "One documented error shape; clients parse only that",
+      "area": "contracts",
+      "group": "Contract",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P3",
+        "P9"
+      ],
+      "check": "Do both sides implement the same single error shape?",
+      "file": "core/contracts.md",
+      "line": 9
+    },
+    {
+      "id": "CT-2",
+      "title": "Status codes carry meaning both sides act on",
+      "area": "contracts",
+      "group": "Contract",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P3"
+      ],
+      "check": "Does each failure path return the status this table assigns?",
+      "file": "core/contracts.md",
+      "line": 17
+    },
+    {
+      "id": "CT-3",
+      "title": "Absent and null mean the same; clients omit empty optionals",
+      "area": "contracts",
+      "group": "Contract",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P2"
+      ],
+      "check": "Does each optional field accept both an omitted key and null?",
+      "file": "core/contracts.md",
+      "line": 25
+    },
+    {
+      "id": "CT-4",
+      "title": "The server owns workflow state; the client derives display from it",
+      "area": "contracts",
+      "group": "Contract",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P1",
+        "P4"
+      ],
+      "check": "Does the client persist or compute workflow position independently of the server?",
+      "file": "core/contracts.md",
+      "line": 33
+    },
+    {
+      "id": "CT-5",
+      "title": "Every mutation returns the full updated snapshot",
+      "area": "contracts",
+      "group": "Contract",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P9"
+      ],
+      "check": "Does each write endpoint return the same shape as its read endpoint?",
+      "file": "core/contracts.md",
+      "line": 41
+    },
+    {
+      "id": "CT-6",
+      "title": "Read paths tolerate legacy data and unknown fields",
+      "area": "contracts",
+      "group": "Contract",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P2"
+      ],
+      "check": "Is there a test reading a record that contains a retired value?",
+      "file": "core/contracts.md",
+      "line": 49
+    },
+    {
+      "id": "CT-7",
+      "title": "A contract change lands on both sides with tests and a written note",
+      "area": "contracts",
+      "group": "Contract",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P7"
+      ],
+      "check": "Does the change description list every contract change and the client impact of each?",
+      "file": "core/contracts.md",
+      "line": 57
+    },
+    {
+      "id": "CT-8",
+      "title": "State the auth transport and its consequences",
+      "area": "contracts",
+      "group": "Contract",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P13"
+      ],
+      "check": "Is the auth transport documented with its origin policy and token-storage decision?",
+      "file": "core/contracts.md",
+      "line": 65
+    },
+    {
+      "id": "T-1",
+      "title": "Test at the boundary each layer exposes",
+      "area": "testing",
+      "group": "Testing",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P11"
+      ],
+      "check": "Does each new behaviour have a test at its layer's public boundary?",
+      "file": "core/testing.md",
+      "line": 8
+    },
+    {
+      "id": "T-2",
+      "title": "Prove every fix red before green",
+      "area": "testing",
+      "group": "Testing",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P11"
+      ],
+      "check": "Does the change state that each new regression test failed before the fix?",
+      "file": "core/testing.md",
+      "line": 16
+    },
+    {
+      "id": "T-3",
+      "title": "Failure paths are first-class test cases",
+      "area": "testing",
+      "group": "Testing",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P11",
+        "P5"
+      ],
+      "check": "For each new write path, is there a rollback test and, where a constraint exists, a conflict test?",
+      "file": "core/testing.md",
+      "line": 24
+    },
+    {
+      "id": "T-4",
+      "title": "Fakes fail loudly",
+      "area": "testing",
+      "group": "Testing",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P11"
+      ],
+      "check": "Would the test fail if the code called the collaborator with a wrong argument or one extra time?",
+      "file": "core/testing.md",
+      "line": 32
+    },
+    {
+      "id": "T-5",
+      "title": "A test asserts exactly what its name claims",
+      "area": "testing",
+      "group": "Testing",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P7"
+      ],
+      "check": "Does each test assert every outcome its name states?",
+      "file": "core/testing.md",
+      "line": 40
+    },
+    {
+      "id": "T-6",
+      "title": "Tests are deterministic, order-independent, and offline",
+      "area": "testing",
+      "group": "Testing",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P11"
+      ],
+      "check": "Does the suite pass in shuffled order with the network disabled?",
+      "file": "core/testing.md",
+      "line": 48
+    },
+    {
+      "id": "T-7",
+      "title": "Run the same command locally and in CI, and know what it selects",
+      "area": "testing",
+      "group": "Testing",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P7"
+      ],
+      "check": "Is the CI test step the same command the README documents, and is the engine it selects stated?",
+      "file": "core/testing.md",
+      "line": 56
+    },
+    {
+      "id": "T-8",
+      "title": "Exercise transactions and constraints on the production database engine",
+      "area": "testing",
+      "group": "Testing",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P11"
+      ],
+      "check": "Were the transaction and constraint tests run on the production engine?",
+      "file": "core/testing.md",
+      "line": 64
+    },
+    {
+      "id": "T-9",
+      "title": "A pattern justified by testability must have tests",
+      "area": "testing",
+      "group": "Testing",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P6"
+      ],
+      "check": "Does every manager, derivation and service introduced have tests that CI runs?",
+      "file": "core/testing.md",
+      "line": 72
+    },
+    {
+      "id": "T-10",
+      "title": "Keep end-to-end tests few, on stable hooks, with stated prerequisites",
+      "area": "testing",
+      "group": "Testing",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P11"
+      ],
+      "check": "Are the prerequisites for each end-to-end test written down, including feature-flag values?",
+      "file": "core/testing.md",
+      "line": 80
+    },
+    {
+      "id": "T-11",
+      "title": "Contract-test configuration: code, infrastructure, and docs must agree",
+      "area": "testing",
+      "group": "Testing",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P7"
+      ],
+      "check": "Is each multiply-declared fact covered by a test that compares its sources?",
+      "file": "core/testing.md",
+      "line": 88
+    },
+    {
+      "id": "D-1",
+      "title": "CI gates every change: lint, types, tests, deploy checks",
+      "area": "delivery",
+      "group": "Continuous integration",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P7",
+        "P12"
+      ],
+      "check": "Does CI run every check the project relies on, including the newly added one?",
+      "file": "core/delivery.md",
+      "line": 8
+    },
+    {
+      "id": "D-2",
+      "title": "CI has least privilege and pinned dependencies",
+      "area": "delivery",
+      "group": "Continuous integration",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P13"
+      ],
+      "check": "Do check jobs run without cloud credentials and are all actions pinned to a commit?",
+      "file": "core/delivery.md",
+      "line": 16
+    },
+    {
+      "id": "D-3",
+      "title": "A deploy workflow re-tests before it ships",
+      "area": "delivery",
+      "group": "Deploy",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P12"
+      ],
+      "check": "Does the deploy workflow run the test suite on the revision it ships?",
+      "file": "core/delivery.md",
+      "line": 26
+    },
+    {
+      "id": "D-4",
+      "title": "Gate deploys with an explicit switch checked before credentials",
+      "area": "delivery",
+      "group": "Deploy",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P12"
+      ],
+      "check": "Is the gate a job-level condition that runs before credentials are requested?",
+      "file": "core/delivery.md",
+      "line": 34
+    },
+    {
+      "id": "D-5",
+      "title": "Know what triggers a deploy; baked configuration needs a rebuild",
+      "area": "delivery",
+      "group": "Deploy",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P12"
+      ],
+      "check": "After this change merges, is a manual deploy or rebuild needed, and is that written in the change description?",
+      "file": "core/delivery.md",
+      "line": 42
+    },
+    {
+      "id": "D-6",
+      "title": "Releases are additive until an atomic swap, then health-gated",
+      "area": "delivery",
+      "group": "Deploy",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P12",
+        "P5"
+      ],
+      "check": "Can every step before the swap fail without affecting traffic, and does a failed health check restore the previous release?",
+      "file": "core/delivery.md",
+      "line": 50
+    },
+    {
+      "id": "D-7",
+      "title": "Assert the safety net before any irreversible step",
+      "area": "delivery",
+      "group": "Deploy",
+      "severity": "RED",
+      "tier": "compact",
+      "principles": [
+        "P12"
+      ],
+      "check": "Is each irreversible step preceded by an assertion of its safety net?",
+      "file": "core/delivery.md",
+      "line": 58
+    },
+    {
+      "id": "D-8",
+      "title": "Publish hashed assets first, the entry document last and uncached",
+      "area": "delivery",
+      "group": "Deploy",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P12"
+      ],
+      "check": "Is the entry document uploaded after its assets and served uncached?",
+      "file": "core/delivery.md",
+      "line": 66
+    },
+    {
+      "id": "D-9",
+      "title": "Verify a deploy by observing new behavior at the public edge",
+      "area": "delivery",
+      "group": "Deploy",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P12"
+      ],
+      "check": "Does the change description record evidence taken from the public endpoint after deploy?",
+      "file": "core/delivery.md",
+      "line": 74
+    },
+    {
+      "id": "D-10",
+      "title": "Work in a fresh branch from current main, never in a dirty checkout",
+      "area": "delivery",
+      "group": "Source control",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P12"
+      ],
+      "check": "Was the work done in a task-specific branch from current main with no unrelated files touched?",
+      "file": "core/delivery.md",
+      "line": 84
+    },
+    {
+      "id": "D-11",
+      "title": "Re-fetch and compare before squashing; check for silent removals",
+      "area": "delivery",
+      "group": "Source control",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P12"
+      ],
+      "check": "Does the diff against the current base contain only changes this task intended?",
+      "file": "core/delivery.md",
+      "line": 92
+    },
+    {
+      "id": "D-12",
+      "title": "Infrastructure applies are deliberate, never automatic from defaults",
+      "area": "delivery",
+      "group": "Source control",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P12"
+      ],
+      "check": "Can CI apply infrastructure without a deliberate human or protected step?",
+      "file": "core/delivery.md",
+      "line": 100
+    },
+    {
+      "id": "D-13",
+      "title": "A pull request states what, why, contract changes, evidence, and rollback",
+      "area": "delivery",
+      "group": "Source control",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P7"
+      ],
+      "check": "Does the description contain all five parts with concrete evidence?",
+      "file": "core/delivery.md",
+      "line": 108
+    },
+    {
+      "id": "R-1",
+      "title": "Review through independent lenses",
+      "area": "review",
+      "group": "Review",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P11"
+      ],
+      "check": "Was each lens applied, and is the outcome of each recorded?",
+      "file": "core/review.md",
+      "line": 8
+    },
+    {
+      "id": "R-2",
+      "title": "A finding needs a location, evidence, a failure scenario, and a fix",
+      "area": "review",
+      "group": "Review",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P7"
+      ],
+      "check": "Does every finding include all five parts?",
+      "file": "core/review.md",
+      "line": 16
+    },
+    {
+      "id": "R-3",
+      "title": "Verify a finding before acting on it",
+      "area": "review",
+      "group": "Review",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P11"
+      ],
+      "check": "Is each acted-on finding marked as verified, with how?",
+      "file": "core/review.md",
+      "line": 24
+    },
+    {
+      "id": "R-4",
+      "title": "Re-audit every fix independently",
+      "area": "review",
+      "group": "Review",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P11"
+      ],
+      "check": "Was each finding re-checked against the final diff by someone who did not write the fix?",
+      "file": "core/review.md",
+      "line": 32
+    },
+    {
+      "id": "R-5",
+      "title": "Classify by severity and keep an append-only debt ledger",
+      "area": "review",
+      "group": "Review",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P7"
+      ],
+      "check": "Is every unfixed finding in the ledger with a rule ID and a disposition?",
+      "file": "core/review.md",
+      "line": 40
+    },
+    {
+      "id": "R-6",
+      "title": "Exercise the change in the running product, including flag states",
+      "area": "review",
+      "group": "Review",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P11",
+        "P12"
+      ],
+      "check": "Is there a recorded run of the change in the product for each flag state?",
+      "file": "core/review.md",
+      "line": 48
+    },
+    {
+      "id": "R-7",
+      "title": "Merge on green checks, clean review, and passing QA; else a human decides",
+      "area": "review",
+      "group": "Review",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P12"
+      ],
+      "check": "Are all three gates green, or has a person explicitly accepted the remaining findings?",
+      "file": "core/review.md",
+      "line": 56
+    },
+    {
+      "id": "A-1",
+      "title": "Follow the precedence order: user, project, existing code, Doctrine",
+      "area": "adoption",
+      "group": "Adoption",
+      "severity": "RED",
+      "tier": "micro",
+      "principles": [
+        "P14"
+      ],
+      "check": "Where the change departs from Doctrine, is the higher-precedence source named?",
+      "file": "core/adoption.md",
+      "line": 8
+    },
+    {
+      "id": "A-2",
+      "title": "Detect the adoption mode before writing code",
+      "area": "adoption",
+      "group": "Adoption",
+      "severity": "ORANGE",
+      "tier": "compact",
+      "principles": [
+        "P14"
+      ],
+      "check": "Is the adoption mode stated at the start of the work?",
+      "file": "core/adoption.md",
+      "line": 16
+    },
+    {
+      "id": "A-3",
+      "title": "Apply the principle in the local idiom; never plant a competing pattern",
+      "area": "adoption",
+      "group": "Adoption",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P14"
+      ],
+      "check": "Does the change use the project's existing mechanisms for layering, errors and state?",
+      "file": "core/adoption.md",
+      "line": 24
+    },
+    {
+      "id": "A-4",
+      "title": "No drive-by refactors",
+      "area": "adoption",
+      "group": "Adoption",
+      "severity": "ORANGE",
+      "tier": "micro",
+      "principles": [
+        "P14",
+        "P12"
+      ],
+      "check": "Is every changed line required by the task?",
+      "file": "core/adoption.md",
+      "line": 32
+    },
+    {
+      "id": "A-5",
+      "title": "When a rule cannot be met, say so and record it as debt with its ID",
+      "area": "adoption",
+      "group": "Adoption",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P7"
+      ],
+      "check": "Is each unmet rule named with a reason?",
+      "file": "core/adoption.md",
+      "line": 40
+    },
+    {
+      "id": "A-6",
+      "title": "Migrate existing code in order of risk removed per unit of effort",
+      "area": "adoption",
+      "group": "Adoption",
+      "severity": "YELLOW",
+      "tier": "compact",
+      "principles": [
+        "P6"
+      ],
+      "check": "Does the migration plan start with data integrity and input validation rather than restructuring?",
+      "file": "core/adoption.md",
+      "line": 48
+    }
+  ]
+}
